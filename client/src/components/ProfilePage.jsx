@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react"
-import { Settings, Heart, Star, Clock, TrendingUp, Award,
+import {
+  Settings, Heart, Star, Clock, TrendingUp, Award,
   Camera, Edit3, Save, X, Film, Music, Book, Gamepad2, Tv,
   MapPin, Calendar, Mail, Link2, Shield,
 } from "lucide-react"
@@ -129,9 +130,9 @@ const ProfilePage = ({ navigateToPage }) => {
   const fileInputRef = useRef(null);
 
   // New: single fetch for all profile data
-const { auth } = useAuth();
-const userId = auth.user?.id; // or auth.user?._id depending on your backend
-console.log("now idf is: ", userId);
+  const { auth } = useAuth();
+  const userId = auth.user?.id; // or auth.user?._id depending on your backend
+  console.log("now idf is: ", userId);
   useEffect(() => {
     console.log("Fetching profile for userId:", userId);
     if (!userId) return;
@@ -142,15 +143,23 @@ console.log("now idf is: ", userId);
         data.name = auth.user?.name;
         setProfileData(data);
         setTempProfileData(data);
-        console.log("is data empty",data);
+        console.log("is data empty", data);
       })
       .catch(err => console.error(err));
   }, []);
 
-  // Defensive fallback for stats, lists, activity
-  const stats = Array.isArray(profileData?.stats) ? profileData.stats : [];
-  const recentActivity = Array.isArray(profileData?.activity) ? profileData.activity : [];
+  // Defensive conversions for backend data shape
+  const stats = profileData?.stats
+    ? Object.entries(profileData.stats).map(([key, value]) => ({
+      type: key.charAt(0).toUpperCase() + key.slice(1),
+      count: value?.yearly ?? 0, // or choose weekly/monthly
+    }))
+    : [];
+
   const userLists = Array.isArray(profileData?.lists) ? profileData.lists : [];
+  const recentActivity = Array.isArray(profileData?.activity) ? profileData.activity : [];
+
+
 
   const handleEdit = () => {
     setTempProfileData(profileData)
@@ -307,7 +316,7 @@ console.log("now idf is: ", userId);
                   )}
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4" />
-   
+
                     <span>Joined {profileData?.joinDate ? new Date(profileData.joinDate).toLocaleDateString() : "Not set"}</span>
                   </div>
                   {profileData?.website ? (

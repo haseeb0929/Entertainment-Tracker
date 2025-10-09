@@ -151,7 +151,6 @@ router.get("/items", async (req, res) => {
 
             const response = await fetch(url);
             const data = await response.json();
-
             let filteredGames = (data.results || []).map((item) => ({
                 id: item.id,
                 type: "games",
@@ -162,7 +161,7 @@ router.get("/items", async (req, res) => {
                 country: "Unknown",
                 trending: false,
                 thumbnail: item.background_image || "",
-                description: "",
+                description: item.description || "",
                 released: item.released || "",
                 platforms: item.platforms
                     ? item.platforms.map((p) => p.platform.name)

@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"  // ✅ Added useRef
 import {
   Search, Filter, Star, TrendingUp, Heart, Play, Book,
   Music, Gamepad2, Tv, Film, Home, User, LogIn,
-  Info,
+  Info, AlertCircle,  // ✅ Added AlertCircle for error icon
 } from "lucide-react"
 import { Navigation } from "../lib/Navigation"
 import { Card } from "../lib/Card"
@@ -11,6 +11,7 @@ import { Input } from "../lib/Input"
 import { Button } from "../lib/Button"
 import { Select } from "../lib/Select"
 import { Badge } from "../lib/Badge"
+import { useAuth } from "../utils/AuthContext"
 
 const entertainmentTypes = [
   { id: "movies", name: "Movies", icon: Film, color: "from-red-500 to-pink-500" },
@@ -23,10 +24,12 @@ const entertainmentTypes = [
 const genres = ["Action", "Comedy", "Drama", "Horror", "Romance", "Sci-Fi", "Thriller", "Documentary"]
 const regions = ["Hollywood", "Bollywood", "Korean", "Japanese", "British", "European", "Asian"]
 
-
 const HomePage = ({ navigateToPage = () => { } }) => {
+  const { auth } = useAuth();
+
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
+  const [popup, setPopup] = useState(null);
 
   const [selectedType, setSelectedType] = useState("all")
   const [selectedGenre, setSelectedGenre] = useState("all")
@@ -36,6 +39,9 @@ const HomePage = ({ navigateToPage = () => { } }) => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // ✅ Timeout ref for cleanup
+  const popupTimeoutRef = useRef(null);
+
   useEffect(() => {
     const handler = setTimeout(() => {
       if (searchQuery.length === 0 || searchQuery.length >= 3) {
@@ -44,7 +50,6 @@ const HomePage = ({ navigateToPage = () => { } }) => {
     }, 400)
     return () => clearTimeout(handler)
   }, [searchQuery])
-
 
   const query = new URLSearchParams({
     search: debouncedSearch || "",
@@ -62,6 +67,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
         return res.json()
       })
       .then((data) => {
+        console.log("Fetched items:", data)  // Debug log
         setItems(Array.isArray(data) ? data : [])
       })
       .catch((err) => {
@@ -71,12 +77,63 @@ const HomePage = ({ navigateToPage = () => { } }) => {
       .finally(() => setIsLoading(false))
   }, [query])
 
-  // Handler for adding item to user's list
-  const handleAddToList = (item) => {
-    // TODO: Replace with actual API call to add item to user's list
-    // Example: fetch(`/api/lists/${userId}/add`, { method: 'POST', body: JSON.stringify(item) })
-    alert(`Added "${item.title}" to your list!`);
+  // ✅ Improved handler with logging, fallbacks, and unified popup
+  const handleAddToList = async (item) => {
+    console.log('🔥 Heart clicked for item:', item);  // Debug: Confirm click
+    console.log('Auth status:', auth);  // Debug: Check auth
+
+    if (!auth || !auth.userId) {
+      // ✅ Use popup for consistency (instead of banner)
+      setPopup({
+        message: "Sign in to save your favorite entertainment! 👋",
+        type: "error"
+      });
+      showPopupWithTimeout();
+      return;
+    }
+
+    // ✅ Fallback if url missing (adjust based on your data; e.g., use thumbnail or generate)
+    const itemUrl = item.url || item.thumbnail || `https://example.com/${item.title.replace(/\s+/g, '-')}`;  // Placeholder fallback
+
+    try {
+      console.log('📤 Sending to backend:', { id: auth.userId, item: { url: itemUrl, name: item.title, status: "unwatched" } });  // Debug
+
+      const res = await fetch(`http://localhost:5000/api/profile/saveItem`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: auth.userId,
+          item: { url: itemUrl, name: item.title, status: "unwatched" },
+        }),
+      });
+
+      const data = await res.json();
+      console.log('📥 Backend response:', data);  // Debug
+
+      if (!res.ok) throw new Error(data.msg || "Failed to add item");
+
+      // ✅ Success popup
+      setPopup({ message: `"${item.title}" added to your list! ❤️`, type: "success" });
+      showPopupWithTimeout();
+    } catch (err) {
+      console.error('❌ Add to list error:', err);  // Debug
+      setPopup({ message: err.message || "Failed to add item. Try again!", type: "error" });
+      showPopupWithTimeout();
+    }
   };
+
+  // ✅ Helper to show popup and auto-hide (with cleanup)
+  const showPopupWithTimeout = () => {
+    if (popupTimeoutRef.current) clearTimeout(popupTimeoutRef.current);
+    popupTimeoutRef.current = setTimeout(() => setPopup(null), 3000);
+  };
+
+  // ✅ Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (popupTimeoutRef.current) clearTimeout(popupTimeoutRef.current);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -104,14 +161,39 @@ const HomePage = ({ navigateToPage = () => { } }) => {
           <p className="text-xl text-gray-300">Discover, Track, and Share Your Entertainment Journey</p>
         </header>
 
-        {/* Optional Error Banner */}
-        {error && (
+        {/* Optional Error Banner (keep for loading errors, but use popup for actions) */}
+        {error && typeof error !== 'object' && (
           <div className="max-w-4xl mx-auto mb-6">
             <Card>
               <CardContent>
                 <p className="text-red-300">{error}</p>
               </CardContent>
             </Card>
+          </div>
+        )}
+
+        {/* ✅ Improved Floating Popup Notification - Higher z, better visibility */}
+        {popup && (
+          <div
+            className={`fixed bottom-6 right-6 z-[100] transform transition-all duration-500 ease-out animate-fade-in 
+              ${popup.type === "success" 
+                ? "bg-gradient-to-r from-purple-500 to-pink-500 border border-purple-400/50 shadow-2xl shadow-purple-500/25" 
+                : "bg-red-600 border border-red-400/50 shadow-2xl shadow-red-500/25"} 
+              text-white rounded-xl px-6 py-4 flex items-center gap-3 max-w-sm`}
+            role="alert"  // Accessibility
+          >
+            {popup.type === "success" ? (
+              <Heart className="w-5 h-5 text-white animate-pulse" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-yellow-300" />
+            )}
+            <span className="text-sm font-medium flex-1">{popup.message}</span>
+            <button
+              onClick={() => setPopup(null)}
+              className="ml-2 text-white/70 hover:text-white"
+            >
+              ×
+            </button>  {/* Close button for manual dismiss */}
           </div>
         )}
 
@@ -192,17 +274,20 @@ const HomePage = ({ navigateToPage = () => { } }) => {
             >
               All
             </button>
-            {entertainmentTypes.map((type) => (
-              <button
-                key={type.id}
-                onClick={() => setSelectedType(type.id)}
-                className={`py-2 px-4 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-2 ${selectedType === type.id ? "bg-white/20 text-white" : "text-white/70 hover:text-white"
-                  }`}
-              >
-                <type.icon className="w-4 h-4" />
-                {type.name}
-              </button>
-            ))}
+            {entertainmentTypes.map((type) => {
+              const Icon = type.icon;  // ✅ Fix: Extract Icon properly
+              return (
+                <button
+                  key={type.id}
+                  onClick={() => setSelectedType(type.id)}
+                  className={`py-2 px-4 rounded-md text-sm font-medium transition-all flex items-center justify-center gap-2 ${selectedType === type.id ? "bg-white/20 text-white" : "text-white/70 hover:text-white"
+                    }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {type.name}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -282,7 +367,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
                       <h3 className="text-xl font-bold text-white mb-2">{item.title}</h3>
                       <div className="flex items-center gap-2 mb-3">
                         <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                        <span className="text-white font-semibold">{(item.rating? item.rating : item.popularity) || 0}</span>
+                        <span className="text-white font-semibold">{(item.rating ? item.rating : item.popularity) || 0}</span>
                         <span className="text-gray-300">({item.genre})</span>
                       </div>
                     </div>
@@ -305,6 +390,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
                           size="sm"
                           variant="ghost"
                           className="text-white hover:text-purple-300 hover:bg-white/20"
+                          onClick={() => navigateToPage("itemDetailsPage", { item })}
                         >
                           <Info className="w-4 h-4" />
                         </Button>
@@ -317,7 +403,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
           </div>
         )}
 
-        {/* Empty State */}
+                {/* Empty State */}
         {!isLoading && items.length === 0 && !error && (
           <div className="text-center py-20">
             <div className="w-24 h-24 mx-auto mb-6 bg-white/10 rounded-full flex items-center justify-center">
@@ -330,6 +416,23 @@ const HomePage = ({ navigateToPage = () => { } }) => {
       </div>
 
       <style>{`
+        /* ✨ Smooth "pop-up" fade-in animation */
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(15px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .animate-fade-in {
+          animation: fadeIn 0.5s ease-out both;
+        }
+
+        /* ✨ Upward fade for elements entering the view (like cards or sections) */
         @keyframes fadeInUp {
           from {
             opacity: 0;
@@ -341,17 +444,8 @@ const HomePage = ({ navigateToPage = () => { } }) => {
           }
         }
 
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-
-        .animate-fade-in {
-          animation: fadeIn 0.6s ease-out;
+        .animate-fade-in-up {
+          animation: fadeInUp 0.8s ease-out both;
         }
       `}</style>
     </div>

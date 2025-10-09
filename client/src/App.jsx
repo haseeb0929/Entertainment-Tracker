@@ -2,23 +2,25 @@ import React, { useState, useEffect } from "react";
 import HomePage from "./components/HomePage";
 import ProfilePage from "./components/ProfilePage";
 import AuthPage from "./components/AuthPage";
+import ItemDetailsPage from "./components/ItemDetailsPage";
 import { useAuth } from "./utils/AuthContext";
 
 function App() {
   const [currentPage, setCurrentPage] = useState("home");
+  const [pageProps, setPageProps] = useState({});
   const { setAuth } = useAuth();
 
-  const navigateToPage = (page) => {
+  const navigateToPage = (page, props = {}) => {
     setCurrentPage(page);
+    setPageProps(props);
   };
 
-  // refresh access token when app starts
   useEffect(() => {
     const refresh = async () => {
       try {
-        const res = await fetch("http://localhost:5000/auth/logout", {
+        await fetch("http://localhost:5000/auth/logout", {
           method: "POST",
-          credentials: "include", // sends cookie
+          credentials: "include",
         });
         setAuth(null);
       } catch (err) {
@@ -38,6 +40,8 @@ function App() {
         return <ProfilePage navigateToPage={navigateToPage} />;
       case "auth":
         return <AuthPage navigateToPage={navigateToPage} />;
+      case "itemDetailsPage":
+        return <ItemDetailsPage navigateToPage={navigateToPage} {...pageProps} />;
       default:
         return <HomePage navigateToPage={navigateToPage} />;
     }

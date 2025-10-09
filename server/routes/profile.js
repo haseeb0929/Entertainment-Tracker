@@ -19,6 +19,40 @@ router.get("/:userId", async (req, res) => {
   }
 });
 
+router.post("/saveItem", async (req, res) => {
+  try {
+    const { id, item } = req.body;
+
+    if (!id || !item || !item.url || !item.name || !item.description) {
+      res.status(400);
+      return res.json({ msg: "Missing required fields" });
+    }
+
+    // Find the profile belonging to this user
+    const profile = await Profile.findOne({ userId: id });
+    if (!profile) {
+      res.status(404)
+      return res.json({ msg: "Profile not found" });
+    }
+
+    // Add the new item to the user's list
+    profile.lists.push({
+      url: item.url,
+      name: item.name,
+      description: item.description
+    });
+
+    await profile.save();
+
+    res.status(200);
+    return res.json({
+      msg: "Item saved successfully",
+    });
+  } catch (err) {
+    console.error("Error saving item:", err);
+    res.status(500).json({ msg: "Server error" });
+  }
+});
 
 // Update profile
 router.put("/:userId", async (req, res) => {
