@@ -1,12 +1,13 @@
-const express = require("express");
+import express from "express";
 const router = express.Router();
-const { body, validationResult } = require("express-validator");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const crypto = require("crypto");
-const User = require("../models/User");
-const { requireAuth } = require("../middleware/auth");
-const sendResetEmail = require("../utils/email");
+import { body, validationResult } from "express-validator";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import crypto from "crypto";
+import User from "../models/User.js";
+import requireAuth from "../middleware/auth.js";
+import sendResetEmail from "../utils/email.js";
+import Profile from "../models/Profile.js";
 
 // helpers
 const signAccessToken = (user) => {
@@ -36,26 +37,55 @@ router.post(
   [
     body("name").trim().notEmpty().withMessage("Name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
-    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 chars"),
+    body("password").isLength({ min: 8 }).withMessage("Password must be at least 8 chars long"),
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
+    }
 
     const { name, email, password } = req.body;
+
     try {
-      const exists = await User.findOne({ email: email.toLowerCase() });
-      if (exists) return res.status(409).json({ msg: "Email already in use" });
+      // Check if user exists
+      const existingUser = await User.findOne({ email: email.toLowerCase() });
+      if (existingUser) {
+        return res.status(409).json({ msg: "Email already in use" });
+      }
 
-      const saltRounds = 12;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-
-      const user = new User({ name, email: email.toLowerCase(), passwordHash });
+      // Hash password
+      const passwordHash = await bcrypt.hash(password, 12);
+      const user = new User({
+        name,
+        email: email.toLowerCase(),
+        passwordHash,
+        roles: ["user"],
+        refreshTokens: [],
+      });
       await user.save();
 
-      return res.status(201).json({ msg: "Account created" });
+      // Create Profile (personal info, lists, stats)
+      const profile = new Profile({
+        userId: user._id,
+        bio: "",
+        location: "",
+        website: "",
+        avatarUrl: "",
+        lists: [],
+        activity: [],
+        // schema default will auto-create empty stats with zeros
+        stats: {}, 
+        joinDate: new Date(),
+      });
+      await profile.save();
+
+      return res.status(201).json({
+        msg: "Account created successfully",
+        userId: user._id,
+      });
     } catch (err) {
-      console.error("Register error", err);
+      console.error("Register error:", err);
       return res.status(500).json({ msg: "Server error" });
     }
   }
@@ -70,15 +100,24 @@ router.post(
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      res.status(422);
+      return res.json({ errors: errors.array() });
+    }
 
     const { email, password } = req.body;
     try {
       const user = await User.findOne({ email: email.toLowerCase() });
-      if (!user) return res.status(401).json({ msg: "Invalid credentials" });
+      if (!user) {
+        res.status(401);
+        return res.json({ msg: "Invalid credentials" });
+      }
 
       const match = await bcrypt.compare(password, user.passwordHash);
-      if (!match) return res.status(401).json({ msg: "Invalid credentials" });
+      if (!match) {
+        res.status(401);
+        return res.json({ msg: "Invalid credentials" });
+      }
 
       // sign access token
       const accessToken = signAccessToken(user);
@@ -108,10 +147,11 @@ router.post(
         maxAge: expiresInDays * 24 * 60 * 60 * 1000,
       });
 
-      return res.json({ accessToken, user: { id: user._id, name: user.name, email: user.email } });
+      return res.json({ accessToken, userr: { id: user._id, name: user.name, email: user.email } });
     } catch (err) {
       console.error("Login error", err);
-      return res.status(500).json({ msg: "Server error" });
+      res.status(500);
+      return res.json({ msg: "Server error" });
     }
   }
 );
@@ -120,7 +160,10 @@ router.post(
 router.post("/refresh", async (req, res) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
-    if (!refreshToken) return res.status(401).json({ msg: "No refresh token" });
+    if (!refreshToken) {
+      res.status(401);
+      return res.json({ msg: "No refresh token" });
+    }
 
     const refreshTokenHash = hashToken(refreshToken);
 
@@ -129,14 +172,16 @@ router.post("/refresh", async (req, res) => {
     if (!user) {
       // invalid token - possible reuse
       res.clearCookie("refreshToken", cookieOptions);
-      return res.status(403).json({ msg: "Invalid refresh token" });
+      res.status(403);
+      return res.json({ msg: "Invalid refresh token" });
     }
 
     // find the token object
     const tokenDoc = user.refreshTokens.find((t) => t.tokenHash === refreshTokenHash);
     if (!tokenDoc) {
       res.clearCookie("refreshToken", cookieOptions);
-      return res.status(403).json({ msg: "Invalid refresh token" });
+      res.status(403);
+      return res.json({ msg: "Invalid refresh token" });
     }
 
     // check expiry
@@ -145,7 +190,8 @@ router.post("/refresh", async (req, res) => {
       user.refreshTokens = user.refreshTokens.filter((t) => t.tokenHash !== refreshTokenHash);
       await user.save();
       res.clearCookie("refreshToken", cookieOptions);
-      return res.status(403).json({ msg: "Refresh token expired" });
+      res.status(403);
+      return res.json({ msg: "Refresh token expired" });
     }
 
     // rotate tokens: issue new refresh token and replace the doc
@@ -189,7 +235,8 @@ router.post("/refresh", async (req, res) => {
     return res.json({ accessToken, user: { id: user._id, name: user.name, email: user.email } });
   } catch (err) {
     console.error("Refresh error", err);
-    return res.status(500).json({ msg: "Server error" });
+    res.status(500);
+    return res.json({ msg: "Server error" });
   }
 });
 
@@ -207,7 +254,8 @@ router.post("/logout", async (req, res) => {
     return res.json({ msg: "Logged out" });
   } catch (err) {
     console.error("Logout error", err);
-    return res.status(500).json({ msg: "Server error" });
+    res.status(500);
+    return res.json({ msg: "Server error" });
   }
 });
 
@@ -215,11 +263,15 @@ router.post("/logout", async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-passwordHash -refreshTokens");
-    if (!user) return res.status(404).json({ msg: "User not found" });
+    if (!user) {
+      res.status(404);
+      return res.json({ msg: "User not found" });
+    }
     return res.json({ user });
   } catch (err) {
     console.error("Me error", err);
-    return res.status(500).json({ msg: "Server error" });
+    res.status(500);
+    return res.json({ msg: "Server error" });
   }
 });
 
@@ -233,12 +285,18 @@ router.post(
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      res.status(422);
+      return res.json({ errors: errors.array() });
+    }
 
     try {
       const user = await User.findById(req.user.id);
       const match = await bcrypt.compare(req.body.currentPassword, user.passwordHash);
-      if (!match) return res.status(401).json({ msg: "Current password incorrect" });
+      if (!match) {
+        res.status(401);
+        return res.json({ msg: "Current password incorrect" });
+      }
 
       const newHash = await bcrypt.hash(req.body.newPassword, 12);
       user.passwordHash = newHash;
@@ -252,7 +310,8 @@ router.post(
       return res.json({ msg: "Password changed. Please login again." });
     } catch (err) {
       console.error("Change password error", err);
-      return res.status(500).json({ msg: "Server error" });
+      res.status(500);
+      return res.json({ msg: "Server error" });
     }
   }
 );
@@ -260,12 +319,14 @@ router.post(
 // ---------- Forgot password (sends reset link) ----------
 router.post("/forgot-password", [body("email").isEmail().withMessage("Valid email required")], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
+  if (!errors.isEmpty()) {
+    res.status(422);
+    return res.json({ errors: errors.array() });
+  }
 
   try {
     const user = await User.findOne({ email: req.body.email.toLowerCase() });
     if (!user) {
-      // respond with 200 to avoid leaking which emails exist
       return res.json({ msg: "If that email exists, a reset link has been sent." });
     }
 
@@ -294,7 +355,8 @@ router.post("/forgot-password", [body("email").isEmail().withMessage("Valid emai
     return res.json({ msg: "If that email exists, a reset link has been sent." });
   } catch (err) {
     console.error("Forgot password error", err);
-    return res.status(500).json({ msg: "Server error" });
+    res.status(500);
+    return res.json({ msg: "Server error" });
   }
 });
 
@@ -308,17 +370,24 @@ router.post(
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      res.status(422);
+      return res.json({ errors: errors.array() });
+    }
 
     const { email, token, password } = req.body;
     try {
       const user = await User.findOne({ email: email.toLowerCase() });
-      if (!user) return res.status(400).json({ msg: "Invalid token or email" });
+      if (!user) {
+        res.status(400);
+        return res.json({ msg: "Invalid token or email" });
+      }
 
       const tokenHash = hashToken(token);
       const tokenDoc = user.refreshTokens.find((t) => t.tokenHash === tokenHash);
       if (!tokenDoc || tokenDoc.expiresAt < new Date()) {
-        return res.status(400).json({ msg: "Invalid or expired token" });
+        res.status(400);
+        return res.json({ msg: "Invalid or expired token" });
       }
 
       // update password, remove all refresh tokens
@@ -332,9 +401,10 @@ router.post(
       return res.json({ msg: "Password reset successful. Please login." });
     } catch (err) {
       console.error("Reset password error", err);
-      return res.status(500).json({ msg: "Server error" });
+      res.status(500);
+      return res.json({ msg: "Server error" });
     }
   }
 );
 
-module.exports = router;
+export default router;

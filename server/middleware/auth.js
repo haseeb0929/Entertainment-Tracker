@@ -1,6 +1,6 @@
-const jwt = require("jsonwebtoken");
+import jwt from "jsonwebtoken";
 
-exports.requireAuth = (req, res, next) => {
+const requireAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ msg: "Unauthorized" });
@@ -16,3 +16,5 @@ exports.requireAuth = (req, res, next) => {
     return res.status(401).json({ msg: "Invalid or expired token" });
   }
 };
+
+export default requireAuth;

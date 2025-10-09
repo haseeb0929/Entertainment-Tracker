@@ -9,9 +9,7 @@ import { CardContent } from "../lib/CardContent"
 import { Input } from "../lib/Input"
 import { Button } from "../lib/Button"
 import { Badge } from "../lib/Badge"
-
-// ...existing code...
-
+import { useAuth } from "../utils/AuthContext"
 
 export const Avatar = ({ src, alt, children, className = "" }) => (
   <div
@@ -122,41 +120,37 @@ function getColorForType(type) {
 }
 
 const ProfilePage = ({ navigateToPage }) => {
-  const [stats, setStats] = useState([]);
-    useEffect(() => {
-      fetch("http://localhost:5000/api/stats/USER_ID")
-        .then(res => res.json())
-        .then(data => setStats(data));
-    }, []);
-
-  const [recentActivity, setRecentActivity] = useState([]);
-  useEffect(() => {
-      fetch("http://localhost:5000/api/activity/USER_ID")
-        .then(res => res.json())
-        .then(data => setRecentActivity(data));
-    }, []);
-
-  const [userLists, setUserLists] = useState([]);
-  useEffect(() => {
-      fetch("http://localhost:5000/api/lists/USER_ID")
-        .then(res => res.json())
-        .then(data => setUserLists(data));
-    }, []);
-  const [isEditing, setIsEditing] = useState(false)
   const [profileData, setProfileData] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [tempProfileData, setTempProfileData] = useState(profileData);
+  const [showEmail, setShowEmail] = useState(false);
+  const [showLocation, setShowLocation] = useState(true);
+  const [showStats, setShowStats] = useState(true);
+  const fileInputRef = useRef(null);
 
+  // New: single fetch for all profile data
+const { auth } = useAuth();
+const userId = auth.user?.id; // or auth.user?._id depending on your backend
+console.log("now idf is: ", userId);
   useEffect(() => {
-    fetch("http://localhost:5000/api/profile/USER_ID")
+    console.log("Fetching profile for userId:", userId);
+    if (!userId) return;
+    console.log("UserID:", userId);
+    fetch(`http://localhost:5000/api/profile/${userId}`)
       .then(res => res.json())
-      .then(data => setProfileData(data))
+      .then(data => {
+        data.name = auth.user?.name;
+        setProfileData(data);
+        setTempProfileData(data);
+        console.log("is data empty",data);
+      })
       .catch(err => console.error(err));
   }, []);
 
-  const [tempProfileData, setTempProfileData] = useState(profileData)
-  const [showEmail, setShowEmail] = useState(false)
-  const [showLocation, setShowLocation] = useState(true)
-  const [showStats, setShowStats] = useState(true)
-  const fileInputRef = useRef(null)
+  // Defensive fallback for stats, lists, activity
+  const stats = Array.isArray(profileData?.stats) ? profileData.stats : [];
+  const recentActivity = Array.isArray(profileData?.activity) ? profileData.activity : [];
+  const userLists = Array.isArray(profileData?.lists) ? profileData.lists : [];
 
   const handleEdit = () => {
     setTempProfileData(profileData)
@@ -164,7 +158,7 @@ const ProfilePage = ({ navigateToPage }) => {
   }
 
   const handleSave = () => {
-    fetch("http://localhost:5000/api/profile/USER_ID", {
+    fetch(`http://localhost:5000/api/profile/${userId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(tempProfileData),
@@ -242,11 +236,11 @@ const ProfilePage = ({ navigateToPage }) => {
                       />
                     ) : (
                       <h1 className="text-3xl md:text-4xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">
-                        {profileData.name}
+                        {profileData.name || "No Name"}
                       </h1>
                     )
                   ) : (
-                    <h1 className="text-3xl md:text-4xl font-bold text-white">Loading...</h1>
+                    <h1 className="text-3xl md:text-4xl font-bold text-white">Profile name not set</h1>
                   )}
                   <Badge className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-3 py-1">
                     PRO Member
@@ -261,10 +255,10 @@ const ProfilePage = ({ navigateToPage }) => {
                       className="text-lg text-gray-300 bg-white/10 border-white/20 mb-4 text-center md:text-left"
                     />
                   ) : (
-                    <p className="text-lg text-gray-300 mb-4">{profileData.username}</p>
+                    <p className="text-lg text-gray-300 mb-4">{profileData.username || "No username set"}</p>
                   )
                 ) : (
-                  <p className="text-lg text-gray-300 mb-4">Loading...</p>
+                  <p className="text-lg text-gray-300 mb-4">No username set</p>
                 )}
 
                 {profileData ? (
@@ -276,10 +270,10 @@ const ProfilePage = ({ navigateToPage }) => {
                       rows={3}
                     />
                   ) : (
-                    <p className="text-gray-300 mb-6 max-w-2xl">{profileData.bio}</p>
+                    <p className="text-gray-300 mb-6 max-w-2xl">{profileData.bio || "No bio provided."}</p>
                   )
                 ) : (
-                  <p className="text-gray-300 mb-6 max-w-2xl">Loading...</p>
+                  <p className="text-gray-300 mb-6 max-w-2xl">No bio provided.</p>
                 )}
 
                 <div className="flex flex-wrap gap-4 text-sm text-gray-400 mb-6">
@@ -293,7 +287,7 @@ const ProfilePage = ({ navigateToPage }) => {
                           className="bg-white/10 border-white/20 text-white"
                         />
                       ) : (
-                        <span>{profileData?.location || "Loading..."}</span>
+                        <span>{profileData?.location || "Not set"}</span>
                       )}
                     </div>
                   )}
@@ -307,20 +301,26 @@ const ProfilePage = ({ navigateToPage }) => {
                           className="bg-white/10 border-white/20 text-white"
                         />
                       ) : (
-                        <span>{profileData?.email || "Loading..."}</span>
+                        <span>{profileData?.email || "Not set"}</span>
                       )}
                     </div>
                   )}
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4" />
-                    <span>Joined {profileData?.joinDate || "Loading..."}</span>
+   
+                    <span>Joined {profileData?.joinDate ? new Date(profileData.joinDate).toLocaleDateString() : "Not set"}</span>
                   </div>
-                  {profileData?.website && (
+                  {profileData?.website ? (
                     <div className="flex items-center gap-2">
                       <Link2 className="w-4 h-4" />
-                      <a href="#" className="text-purple-400 hover:text-purple-300">
+                      <a href={profileData.website} className="text-purple-400 hover:text-purple-300" target="_blank" rel="noopener noreferrer">
                         {profileData.website}
                       </a>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Link2 className="w-4 h-4" />
+                      <span>Not set</span>
                     </div>
                   )}
                 </div>
@@ -542,7 +542,7 @@ const ProfilePage = ({ navigateToPage }) => {
         </Tabs>
       </div>
 
-      <style jsx>{`
+      <style>{`
         @keyframes fadeInUp {
           from {
             opacity: 0;

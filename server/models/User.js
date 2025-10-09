@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const RefreshTokenSchema = new mongoose.Schema({
   tokenHash: { type: String, required: true },
@@ -15,4 +15,4 @@ const UserSchema = new mongoose.Schema({
   refreshTokens: { type: [RefreshTokenSchema], default: [] },
 }, { timestamps: true });
 
-module.exports = mongoose.model("User", UserSchema);
+export default mongoose.model("User", UserSchema);

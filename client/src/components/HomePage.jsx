@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import {
   Search, Filter, Star, TrendingUp, Heart, Play, Book,
   Music, Gamepad2, Tv, Film, Home, User, LogIn,
+  Info,
 } from "lucide-react"
 import { Navigation } from "../lib/Navigation"
 import { Card } from "../lib/Card"
@@ -25,17 +26,28 @@ const regions = ["Hollywood", "Bollywood", "Korean", "Japanese", "British", "Eur
 
 const HomePage = ({ navigateToPage = () => { } }) => {
   const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+
   const [selectedType, setSelectedType] = useState("all")
   const [selectedGenre, setSelectedGenre] = useState("all")
   const [selectedRegion, setSelectedRegion] = useState("all")
-  const [hoveredCard, setHoveredCard] = useState(null)
 
   const [items, setItems] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery.length === 0 || searchQuery.length >= 3) {
+        setDebouncedSearch(searchQuery)
+      }
+    }, 400)
+    return () => clearTimeout(handler)
+  }, [searchQuery])
+
+
   const query = new URLSearchParams({
-    search: searchQuery || "",
+    search: debouncedSearch || "",
     type: selectedType || "all",
     genre: selectedGenre || "all",
     region: selectedRegion || "all",
@@ -44,21 +56,27 @@ const HomePage = ({ navigateToPage = () => { } }) => {
   useEffect(() => {
     setIsLoading(true)
     setError(null)
-    fetch(`localhost:5000/getItemOf?${query}`, { method: "GET" })
+    fetch(`http://localhost:5000/getItemsOf/items?${query}`, { method: "GET" })
       .then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`)
         return res.json()
       })
       .then((data) => {
-        setItems(Array.isArray(data?.items) ? data.items : [])
+        setItems(Array.isArray(data) ? data : [])
       })
       .catch((err) => {
-        console.log("[v0] Fetch error:", err)
         setError("Failed to load content")
         setItems([])
       })
       .finally(() => setIsLoading(false))
   }, [query])
+
+  // Handler for adding item to user's list
+  const handleAddToList = (item) => {
+    // TODO: Replace with actual API call to add item to user's list
+    // Example: fetch(`/api/lists/${userId}/add`, { method: 'POST', body: JSON.stringify(item) })
+    alert(`Added "${item.title}" to your list!`);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -192,9 +210,9 @@ const HomePage = ({ navigateToPage = () => { } }) => {
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {[...Array(8)].map((_, index) => (
-              <Card key={index} className="animate-pulse">
-                <CardContent>
-                  <div className="w-12 h-12 bg-white/20 rounded-lg mb-4"></div>
+              <Card key={index} className="animate-pulse h-80 bg-gray-800 rounded-lg">
+                <CardContent className="p-4">
+                  <div className="w-full h-48 bg-white/20 rounded-lg mb-4"></div>
                   <div className="h-6 bg-white/20 rounded mb-2"></div>
                   <div className="h-4 bg-white/20 rounded mb-4"></div>
                   <div className="h-4 bg-white/20 rounded w-3/4"></div>
@@ -211,74 +229,87 @@ const HomePage = ({ navigateToPage = () => { } }) => {
               return (
                 <Card
                   key={item.id || `${item.title}-${index}`}
-                  className="group relative overflow-hidden hover:border-purple-400 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/25"
-                  onMouseEnter={() => setHoveredCard(item.id)}
-                  onMouseLeave={() => setHoveredCard(null)}
+                  className="group relative overflow-hidden h-96 hover:border-purple-400 transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/25 rounded-lg"
                   style={{
                     animation: `fadeInUp 0.6s ease-out ${index * 0.1}s both`,
                   }}
                 >
+                  {/* Thumbnail as <img> */}
+                  {item.thumbnail ? (
+                    <img
+                      src={item.thumbnail
+                        ?.replace("http://", "https://")
+                        .replace("zoom=1", "zoom=3")}
+                      alt={item.title}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-gray-800">
+                      <Film className="w-16 h-16 text-gray-500 mb-2" />
+                      <span className="text-gray-400 text-sm font-semibold">Thumbnail Not Available</span>
+                    </div>
+                  )}
+
+                  {/* Dark overlay for readability */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all duration-300"></div>
+
+                  {/* Subtle type color tint */}
                   <div
-                    className={`absolute inset-0 bg-gradient-to-br ${typeInfo?.color} opacity-0 group-hover:opacity-20 transition-opacity duration-300`}
+                    className={`absolute inset-0 bg-gradient-to-br ${typeInfo?.color || "from-gray-500 to-gray-500"
+                      } opacity-0 group-hover:opacity-10 transition-opacity duration-300`}
                   ></div>
 
-                  <CardContent>
-                    <div className="flex items-start justify-between mb-4">
-                      <div className={`p-3 rounded-lg bg-gradient-to-br ${typeInfo?.color}`}>
-                        <Icon className="w-6 h-6 text-white" />
+                  {/* Your overlayed card content */}
+                  <CardContent className="relative z-10 p-4 flex flex-col justify-between h-full opacity-0 group-hover:opacity-100 transition-all duration-300">
+                    {/* Top: Icon and Trending Badge */}
+                    <div className="flex items-start justify-between">
+                      <div
+                        className={`p-2 rounded-lg bg-gradient-to-br ${typeInfo?.color || "from-gray-500 to-gray-500"
+                          } bg-opacity-80`}
+                      >
+                        <Icon className="w-5 h-5 text-white" />
                       </div>
                       {item.trending && (
-                        <Badge className="bg-gradient-to-r from-orange-500 to-red-500 text-white">
+                        <Badge className="bg-gradient-to-r from-orange-500 to-red-500 text-white bg-opacity-90">
                           <TrendingUp className="w-3 h-3 mr-1" />
                           Trending
                         </Badge>
                       )}
                     </div>
 
-                    <h3 className="text-xl font-bold text-white mb-2 group-hover:text-purple-300 transition-colors">
-                      {item.title}
-                    </h3>
-
-                    <div className="flex items-center gap-2 mb-3">
-                      <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                      <span className="text-white font-semibold">{item.rating}</span>
-                      <span className="text-gray-400">({item.genre})</span>
+                    {/* Middle: Title and Rating */}
+                    <div className="flex flex-col flex-1 justify-end">
+                      <h3 className="text-xl font-bold text-white mb-2">{item.title}</h3>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                        <span className="text-white font-semibold">{(item.rating? item.rating : item.popularity) || 0}</span>
+                        <span className="text-gray-300">({item.genre})</span>
+                      </div>
                     </div>
 
+                    {/* Bottom: Region Badge and Action Buttons */}
                     <div className="flex items-center justify-between">
-                      <Badge variant="secondary" className="bg-white/10 text-white border-white/20">
+                      <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
                         {item.region}
                       </Badge>
                       <div className="flex gap-2">
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-white hover:text-purple-300 hover:bg-white/10"
+                          className="text-white hover:text-purple-300 hover:bg-white/20"
+                          onClick={() => handleAddToList(item)}
                         >
                           <Heart className="w-4 h-4" />
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-white hover:text-purple-300 hover:bg-white/10"
+                          className="text-white hover:text-purple-300 hover:bg-white/20"
                         >
-                          <Play className="w-4 h-4" />
+                          <Info className="w-4 h-4" />
                         </Button>
                       </div>
                     </div>
-
-                    {hoveredCard === item.id && (
-                      <div
-                        className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex items-end p-6"
-                        style={{ animation: "fadeIn 0.3s ease-out" }}
-                      >
-                        <div className="w-full">
-                          <Button className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white">
-                            View Details
-                          </Button>
-                        </div>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
               )

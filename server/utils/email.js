@@ -1,16 +1,16 @@
-const nodemailer = require("nodemailer");
+import nodemailer from "nodemailer";
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT || "587", 10),
-  secure: false,
+  secure: false, // true for port 465, false for others
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
 
-module.exports = async function sendResetEmail(to, name, resetUrl) {
+async function sendResetEmail(to, name, resetUrl) {
   if (!process.env.SMTP_HOST) {
     console.log("Reset URL (no SMTP configured):", resetUrl);
     return;
@@ -27,4 +27,6 @@ module.exports = async function sendResetEmail(to, name, resetUrl) {
   });
 
   console.log("Reset email sent", info.messageId);
-};
+}
+
+export default sendResetEmail;

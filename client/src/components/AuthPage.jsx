@@ -123,7 +123,9 @@ export default function AuthPage({ navigateToPage = () => { } }) {
 
       if (isLogin) {
         setSuccess("Login successful! Redirecting...")
-        setAuth({ accessToken: data.accessToken, user: data.user });
+        console.log(data.userr);
+        setAuth({ accessToken: data.accessToken, user: data.userr });
+        console.log(data.userr);
          console.log("haha phonch gya");
         setTimeout(() => {
           navigateToPage("profile");
