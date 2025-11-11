@@ -29,6 +29,12 @@ const Checkbox = ({ checked, onCheckedChange, children }) => (
 export default function AuthPage({ navigateToPage = () => { } }) {
   const { setAuth } = useAuth();
   const [isLogin, setIsLogin] = useState(true)
+  const [signupRequested, setSignupRequested] = useState(false)
+  const [verificationCode, setVerificationCode] = useState("")
+  const [showForgot, setShowForgot] = useState(false)
+  const [fpRequested, setFpRequested] = useState(false)
+  const [fpCode, setFpCode] = useState("")
+  const [fpNewPassword, setFpNewPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -98,48 +104,121 @@ export default function AuthPage({ navigateToPage = () => { } }) {
     setIsLoading(true)
 
     try {
-      const url = isLogin
-        ? "http://localhost:5000/auth/login"
-        : "http://localhost:5000/auth/register"
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // important for sessions (cookies)
-        body: JSON.stringify({
-          name: formData.name,
-          email: formData.email,
-          password: formData.password,
-        }),
-      })
-
-      const data = await response.json()
-      setIsLoading(false)
-
-      if (!response.ok) {
-        setErrors({ general: data.msg || "Something went wrong" })
+      if (isLogin) {
+        const response = await fetch("http://localhost:5000/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ email: formData.email, password: formData.password }),
+        })
+        const data = await response.json()
+        setIsLoading(false)
+        if (!response.ok) {
+          setErrors({ general: data.msg || "Invalid credentials" })
+          return
+        }
+        setSuccess("Login successful! Redirecting...")
+        setAuth({ accessToken: data.accessToken, user: data.userr })
+        setTimeout(() => navigateToPage("profile"), 800)
         return
       }
-
-      if (isLogin) {
-        setSuccess("Login successful! Redirecting...")
-        console.log(data.userr);
-        setAuth({ accessToken: data.accessToken, user: data.userr });
-        console.log(data.userr);
-         console.log("haha phonch gya");
-        setTimeout(() => {
-          navigateToPage("profile");
-        }, 1500)
-      } else {
-        setSuccess("Account created successfully! Please log in.")
-        setTimeout(() => {
-          setIsLogin(true)
-          setFormData({ name: "", email: "", password: "", confirmPassword: "", agreeTerms: false })
-        }, 1500)
+      // Sign up step 1: request verification code
+      const response = await fetch("http://localhost:5000/auth/register/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
+      })
+      const data = await response.json()
+      setIsLoading(false)
+      if (!response.ok) {
+        setErrors({ general: data.msg || "Failed to request verification code" })
+        return
       }
+      setSignupRequested(true)
+      setSuccess("Verification code sent to your email. Enter it below to complete sign up.")
     } catch (error) {
       setIsLoading(false)
       setErrors({ general: error.message })
+    }
+  }
+
+  const handleVerifySignup = async () => {
+    setErrors({})
+    if (!verificationCode || verificationCode.length !== 6) {
+      setErrors({ general: "Enter the 6-digit verification code" })
+      return
+    }
+    try {
+      const res = await fetch("http://localhost:5000/auth/register/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: formData.email, code: verificationCode }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setErrors({ general: data.msg || "Invalid or expired code" })
+        return
+      }
+      setSuccess("Registration verified! Please login.")
+      setTimeout(() => {
+        setIsLogin(true)
+        setSignupRequested(false)
+        setVerificationCode("")
+        setFormData({ name: "", email: formData.email, password: "", confirmPassword: "", agreeTerms: false })
+      }, 800)
+    } catch (e) {
+      setErrors({ general: e.message })
+    }
+  }
+
+  const handleForgotPassword = async () => {
+    setErrors({})
+    if (!formData.email) {
+      setErrors({ general: "Enter your email first" })
+      return
+    }
+    try {
+      const res = await fetch("http://localhost:5000/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: formData.email }),
+      })
+      await res.json()
+      setFpRequested(true)
+      setSuccess("Reset code sent to your email. Enter it below with your new password.")
+    } catch (e) {
+      setErrors({ general: e.message })
+    }
+  }
+
+  const handleResetPassword = async () => {
+    setErrors({})
+    if (!fpCode || fpCode.length !== 6 || !fpNewPassword || fpNewPassword.length < 8) {
+      setErrors({ general: "Enter 6-digit code and new password (min 8 chars)" })
+      return
+    }
+    try {
+      const res = await fetch("http://localhost:5000/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: formData.email, code: fpCode, password: fpNewPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setErrors({ general: data.msg || "Invalid code" })
+        return
+      }
+      setSuccess("Password reset successful. Please login.")
+      setShowForgot(false)
+      setFpRequested(false)
+      setFpCode("")
+      setFpNewPassword("")
+    } catch (e) {
+      setErrors({ general: e.message })
     }
   }
 
@@ -371,58 +450,75 @@ export default function AuthPage({ navigateToPage = () => { } }) {
                   {isLoading ? (
                     <div className="flex items-center justify-center">
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                      {isLogin ? "Logging in..." : "Creating account..."}
+                      {isLogin ? "Logging in..." : "Sending code..."}
                     </div>
                   ) : (
                     <div className="flex items-center justify-center">
-                      {isLogin ? "Login" : "Sign Up"}
+                      {isLogin ? "Login" : (signupRequested ? "Resend Code" : "Sign Up")}
                       <ArrowRight className="w-5 h-5 ml-2" />
                     </div>
                   )}
                 </Button>
+
+                {/* Signup verification code block */}
+                {!isLogin && signupRequested && (
+                  <div className="mt-4 space-y-3">
+                    <label className="text-sm font-medium text-gray-300">Verification Code</label>
+                    <Input
+                      type="text"
+                      placeholder="Enter 6-digit code"
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, '').slice(0,6))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleVerifySignup();
+                        }
+                      }}
+                    />
+                    <Button type="button" className="w-full bg-white/10 hover:bg-white/20" onClick={handleVerifySignup}>Verify Code</Button>
+                  </div>
+                )}
               </form>
 
               {/* Forgot Password */}
               {isLogin && (
                 <div className="mt-6 text-center">
-                  <a href="#" className="text-purple-400 hover:text-purple-300 text-sm transition-colors">
+                  <button
+                    onClick={() => setShowForgot((v) => !v)}
+                    className="text-purple-400 hover:text-purple-300 text-sm transition-colors"
+                  >
                     Forgot your password?
-                  </a>
+                  </button>
+                </div>
+              )}
+
+              {isLogin && showForgot && (
+                <div className="mt-4 p-4 bg-white/5 rounded-lg space-y-3">
+                  {!fpRequested ? (
+                    <>
+                      <p className="text-gray-300 text-sm">Enter your email and we'll send you a 6-digit code.</p>
+                      <Button className="w-full bg-white/10 hover:bg-white/20" onClick={handleForgotPassword}>Send Code</Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-300">Code</label>
+                        <Input type="text" value={fpCode} onChange={(e) => setFpCode(e.target.value.replace(/\D/g, '').slice(0,6))} placeholder="6-digit code" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm text-gray-300">New Password</label>
+                        <Input type="password" value={fpNewPassword} onChange={(e) => setFpNewPassword(e.target.value)} placeholder="New password" />
+                      </div>
+                      <Button className="w-full bg-white/10 hover:bg-white/20" onClick={handleResetPassword}>Reset Password</Button>
+                    </>
+                  )}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Social Login */}
-          <div className="mt-8">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-white/20"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-gray-400">
-                  Or continue with
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-4">
-              <Button
-                variant="outline"
-                className="border-white/20 text-white hover:bg-white/10 transition-all duration-300 bg-transparent"
-              >
-                <div className="w-5 h-5 bg-white rounded mr-2"></div>
-                Google
-              </Button>
-              <Button
-                variant="outline"
-                className="border-white/20 text-white hover:bg-white/10 transition-all duration-300 bg-transparent"
-              >
-                <div className="w-5 h-5 bg-white rounded mr-2"></div>
-                GitHub
-              </Button>
-            </div>
-          </div>
+          {/* Social login removed per security/user story requirements */}
         </div>
       </div>
 

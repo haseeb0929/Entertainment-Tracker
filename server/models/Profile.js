@@ -5,10 +5,27 @@ const ListItemSchema = new mongoose.Schema(
     url: { type: String, required: true },
     name: { type: String, required: true },
     description: { type: String, required: true },
+    thumbnail: { type: String, default: "" },
+    rating: { type: Number, min: 0, max: 5, default: 0 },
+    review: { type: String, default: "" },
+    rewatchCount: { type: Number, min: 0, default: 0 },
+    // Added to identify what the item is
+    type: {
+      type: String,
+      enum: ["movies", "series", "music", "books", "games", "unknown"],
+      default: "unknown",
+    },
+    // Optional external API id to aid de-duplication
+    externalId: { type: String },
     status: {
       type: String,
-      enum: ["watched", "unwatched", "hold"],
-      default: "unwatched",
+      enum: [
+        // legacy
+        "watched", "unwatched", "hold",
+        // new categories
+        "currently_watching", "completed", "dropped", "on_hold"
+      ],
+      default: "currently_watching",
     },
   },
   { _id: false }

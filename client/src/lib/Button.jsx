@@ -1,6 +1,7 @@
 export const Button = ({
   children,
   onClick,
+  type,
   className = "",
   variant = "default",
   size = "default",
@@ -21,6 +22,7 @@ export const Button = ({
   return (
     <button
       onClick={onClick}
+      type={type}
       disabled={disabled}
       className={`${baseClasses} ${variants[variant]} ${sizes[size]} ${className} ${
         disabled ? "opacity-50 cursor-not-allowed" : ""

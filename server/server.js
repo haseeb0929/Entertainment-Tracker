@@ -5,6 +5,9 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import cors from "cors";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import authRoutes from "./routes/auth.js";
 import itemsRoutes from "./routes/Items.js";
 import profileRoutes from "./routes/Profile.js";
@@ -32,6 +35,24 @@ app.use("/auth", limiter);
 app.use("/auth", authRoutes);
 app.use("/getItemsOf", itemsRoutes);
 app.use("/api/profile", profileRoutes);
+
+// Static uploads (for avatars)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsRoot = path.join(__dirname, "uploads");
+const avatarsDir = path.join(uploadsRoot, "avatars");
+try {
+  fs.mkdirSync(avatarsDir, { recursive: true });
+} catch (e) { /* ignore */ }
+// Ensure uploads can be embedded cross-origin (client runs on a different port)
+app.use(
+  "/uploads",
+  (req, res, next) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(uploadsRoot)
+);
 
 
 // Health check

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import HomePage from "./components/HomePage";
 import ProfilePage from "./components/ProfilePage";
 import AuthPage from "./components/AuthPage";
@@ -14,23 +14,6 @@ function App() {
     setCurrentPage(page);
     setPageProps(props);
   };
-
-  useEffect(() => {
-    const refresh = async () => {
-      try {
-        await fetch("http://localhost:5000/auth/logout", {
-          method: "POST",
-          credentials: "include",
-        });
-        setAuth(null);
-      } catch (err) {
-        console.error("Refresh failed", err);
-        setAuth(null);
-      }
-    };
-
-    refresh();
-  }, [setAuth]);
 
   const renderPage = () => {
     switch (currentPage) {

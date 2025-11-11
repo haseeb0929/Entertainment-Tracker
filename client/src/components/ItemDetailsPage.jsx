@@ -108,13 +108,6 @@ const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {
               >
                 <Heart className="w-4 h-4 mr-2" /> Add to List
               </Button>
-              <Button
-                variant="outline"
-                className="border-white/30 hover:bg-white/10 text-white py-3"
-              >
-                <Play className="w-4 h-4 mr-2" />
-                {typeInfo.id === "music" ? "Play" : "Watch Now"}
-              </Button>
             </div>
           </div>
 

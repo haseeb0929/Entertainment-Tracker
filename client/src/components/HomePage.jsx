@@ -82,7 +82,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
     console.log('🔥 Heart clicked for item:', item);  // Debug: Confirm click
     console.log('Auth status:', auth);  // Debug: Check auth
 
-    if (!auth || !auth.userId) {
+    if (!auth || !auth.user) {
       // ✅ Use popup for consistency (instead of banner)
       setPopup({
         message: "Sign in to save your favorite entertainment! 👋",
@@ -96,14 +96,22 @@ const HomePage = ({ navigateToPage = () => { } }) => {
     const itemUrl = item.url || item.thumbnail || `https://example.com/${item.title.replace(/\s+/g, '-')}`;  // Placeholder fallback
 
     try {
-      console.log('📤 Sending to backend:', { id: auth.userId, item: { url: itemUrl, name: item.title, status: "unwatched" } });  // Debug
+      console.log('📤 Sending to backend:', { id: auth.user._id, item: { url: itemUrl, name: item.title, status: "unwatched" } });  // Debug
 
       const res = await fetch(`http://localhost:5000/api/profile/saveItem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: auth.userId,
-          item: { url: itemUrl, name: item.title, status: "unwatched" },
+          userId: auth.user.id,
+          item: {
+            url: itemUrl,
+            name: item.title,
+            description: item.description || "",
+            status: "currently_watching",
+            type: item.type || "unknown",
+            thumbnail: item.thumbnail || "",
+            externalId: item.id || undefined,
+          },
         }),
       });
 
@@ -111,6 +119,12 @@ const HomePage = ({ navigateToPage = () => { } }) => {
       console.log('📥 Backend response:', data);  // Debug
 
       if (!res.ok) throw new Error(data.msg || "Failed to add item");
+
+      if (data.duplicate) {
+        setPopup({ message: `"${item.title}" is already in your list.`, type: "error" });
+        showPopupWithTimeout();
+        return;
+      }
 
       // ✅ Success popup
       setPopup({ message: `"${item.title}" added to your list! ❤️`, type: "success" });
