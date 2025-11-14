@@ -51,20 +51,27 @@ const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {
   const backgroundImage = details?.thumbnail?.replace("http://", "https://");
 
   const handleAdd = async () => {
-    if (!auth?.userId) {
+    if (!auth?.user?.id) {
       setError("Please sign in to save this item.");
       return;
     }
     try {
       const res = await fetch("http://localhost:5000/api/profile/saveItem", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
         body: JSON.stringify({
-          id: auth.userId,
+          userId: auth.user.id,
           item: {
+            url: details.url || details.thumbnail || `https://example.com/${details.title}`,
             name: details.title,
-            url: details.url || `https://example.com/${details.title}`,
-            status: "unwatched",
+            description: details.description || "",
+            status: "currently_watching",
+            type: details.type || "unknown",
+            thumbnail: details.thumbnail || "",
+            externalId: details.id || undefined,
           },
         }),
       });

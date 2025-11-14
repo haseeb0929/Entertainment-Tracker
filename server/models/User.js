@@ -11,6 +11,8 @@ const UserSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 100 },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   passwordHash: { type: String, required: true },
+  // unique handle to find friends by username
+  username: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
   verified: { type: Boolean, default: false },
   roles: { type: [String], default: ["user"] },
   refreshTokens: { type: [RefreshTokenSchema], default: [] },

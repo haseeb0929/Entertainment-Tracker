@@ -100,7 +100,10 @@ const HomePage = ({ navigateToPage = () => { } }) => {
 
       const res = await fetch(`http://localhost:5000/api/profile/saveItem`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
         body: JSON.stringify({
           userId: auth.user.id,
           item: {

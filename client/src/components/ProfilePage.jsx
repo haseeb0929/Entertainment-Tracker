@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react"
 import {
   Settings, Heart, Star, Clock, TrendingUp, Award,
   Camera, Edit3, Save, X, Film, Music, Book, Gamepad2, Tv,
-  MapPin, Calendar, Mail, Link2, Shield, ChevronDown, Plus, Minus,
+  MapPin, Calendar, Mail, Link2, Shield, ChevronDown, Plus, Minus, Search,
 } from "lucide-react"
 import { Navigation } from "../lib/Navigation"
 import axios from "axios"
@@ -144,6 +144,15 @@ const ProfilePage = ({ navigateToPage }) => {
   const [avatarFile, setAvatarFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  // Friends state
+  const [friends, setFriends] = useState([]);
+  const [friendUsernameInput, setFriendUsernameInput] = useState("");
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendView, setFriendView] = useState(null); // { user, bio, avatarUrl, lists, stats }
+  const [friendError, setFriendError] = useState("");
+  const [friendQuery, setFriendQuery] = useState("");
+  const [incoming, setIncoming] = useState([]);
+  const [outgoing, setOutgoing] = useState([]);
 
   // New: single fetch for all profile data
   const { auth } = useAuth();
@@ -153,7 +162,11 @@ const ProfilePage = ({ navigateToPage }) => {
     console.log("Fetching profile for userId:", userId);
     if (!userId) return;
     console.log("UserID:", userId);
-    fetch(`http://localhost:5000/api/profile/${userId}`)
+    fetch(`http://localhost:5000/api/profile/${userId}`, {
+      headers: {
+        ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+      },
+    })
       .then(res => res.json())
       .then(data => {
         data.name = auth.user?.name;
@@ -168,12 +181,47 @@ const ProfilePage = ({ navigateToPage }) => {
   useEffect(() => {
     if (!userId) return;
     setStatsLoading(true);
-    fetch(`http://localhost:5000/api/profile/${userId}/stats?window=${statsWindow}`)
+    fetch(`http://localhost:5000/api/profile/${userId}/stats?window=${statsWindow}`, {
+      headers: {
+        ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+      },
+    })
       .then(res => res.json())
       .then(data => setStatsData(data))
       .catch(err => console.error(err))
       .finally(() => setStatsLoading(false));
   }, [userId, statsWindow]);
+
+  // Load friends list
+  useEffect(() => {
+    if (!userId) return;
+    setFriendsLoading(true);
+    fetch(`http://localhost:5000/api/profile/${userId}/friends`, {
+      headers: {
+        ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+      },
+    })
+      .then(res => res.json())
+      .then(data => setFriends(Array.isArray(data.friends) ? data.friends : []))
+      .catch(err => console.error(err))
+      .finally(() => setFriendsLoading(false));
+  }, [userId]);
+
+  // Load pending requests
+  useEffect(() => {
+    if (!userId) return;
+    fetch(`http://localhost:5000/api/profile/${userId}/friends/requests`, {
+      headers: {
+        ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+      },
+    })
+      .then(res => res.json())
+      .then(data => {
+        setIncoming(Array.isArray(data.incoming) ? data.incoming : []);
+        setOutgoing(Array.isArray(data.outgoing) ? data.outgoing : []);
+      })
+      .catch(err => console.error(err));
+  }, [userId]);
 
   // Defensive conversions for backend data shape
   // Stats now fetched from backend endpoint per selected window
@@ -191,7 +239,10 @@ const ProfilePage = ({ navigateToPage }) => {
   const handleSave = () => {
     fetch(`http://localhost:5000/api/profile/${userId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+      },
       body: JSON.stringify(tempProfileData),
     })
       .then(res => res.json())
@@ -201,6 +252,153 @@ const ProfilePage = ({ navigateToPage }) => {
       })
       .catch(err => console.error(err));
   }
+
+  const addFriend = async () => {
+    setFriendError("");
+    const v = friendUsernameInput.trim().toLowerCase();
+    if (!v) { setFriendError("Enter a username"); return; }
+    try {
+      const res = await fetch(`http://localhost:5000/api/profile/${userId}/friends/request`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
+        body: JSON.stringify({ friendUsername: v })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'Failed to send request');
+      setFriendUsernameInput("");
+      // If auto-accepted (mutual), refresh friends; else refresh outgoing
+      if (data.friend) {
+        setFriends((prev) => {
+          const exists = prev.some(f => f.username === (data.friend?.username));
+          return exists ? prev : [...prev, data.friend];
+        });
+      } else {
+        // reload requests
+        try {
+          const r = await fetch(`http://localhost:5000/api/profile/${userId}/friends/requests`, {
+            headers: { ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) },
+          });
+          const d = await r.json();
+          setIncoming(Array.isArray(d.incoming) ? d.incoming : []);
+          setOutgoing(Array.isArray(d.outgoing) ? d.outgoing : []);
+        } catch (_) {}
+      }
+    } catch (e) {
+      setFriendError(e.message);
+    }
+  };
+
+  const removeFriend = async (uname) => {
+    setFriendError("");
+    try {
+      const res = await fetch(`http://localhost:5000/api/profile/${userId}/friends/remove`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
+        body: JSON.stringify({ friendUsername: uname })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'Failed to remove');
+      setFriends(prev => prev.filter(f => f.username !== uname));
+      if (friendView?.user?.username === uname) setFriendView(null);
+    } catch (e) {
+      setFriendError(e.message);
+    }
+  };
+
+  const viewFriend = async (uname) => {
+    setFriendError("");
+    setFriendView(null);
+    try {
+      const res = await fetch(`http://localhost:5000/api/profile/${userId}/friends/view/${encodeURIComponent(uname)}`, {
+        headers: {
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'Not allowed');
+      setFriendView(data);
+    } catch (e) {
+      setFriendError(e.message);
+    }
+  };
+
+  const acceptRequest = async (requesterUsername) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/profile/${userId}/friends/respond`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
+        body: JSON.stringify({ requesterUsername, action: 'accept' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'Failed to accept');
+      // refresh lists
+      await Promise.all([
+        fetch(`http://localhost:5000/api/profile/${userId}/friends`, { headers: { ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) } })
+          .then(r=>r.json()).then(d=> setFriends(Array.isArray(d.friends)? d.friends: [])),
+        fetch(`http://localhost:5000/api/profile/${userId}/friends/requests`, { headers: { ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) } })
+          .then(r=>r.json()).then(d=> { setIncoming(d.incoming||[]); setOutgoing(d.outgoing||[]); })
+      ]);
+    } catch (e) {
+      setFriendError(e.message);
+    }
+  };
+
+  const declineRequest = async (requesterUsername) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/profile/${userId}/friends/respond`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
+        body: JSON.stringify({ requesterUsername, action: 'decline' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'Failed to decline');
+      // refresh requests
+      const r = await fetch(`http://localhost:5000/api/profile/${userId}/friends/requests`, {
+        headers: { ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) },
+      });
+      const d = await r.json();
+      setIncoming(d.incoming||[]);
+      setOutgoing(d.outgoing||[]);
+    } catch (e) {
+      setFriendError(e.message);
+    }
+  };
+
+  const cancelOutgoing = async (targetUsername) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/profile/${userId}/friends/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+        },
+        body: JSON.stringify({ targetUsername })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.msg || 'Failed to cancel');
+      // refresh requests
+      const r = await fetch(`http://localhost:5000/api/profile/${userId}/friends/requests`, {
+        headers: { ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}) },
+      });
+      const d = await r.json();
+      setIncoming(d.incoming||[]);
+      setOutgoing(d.outgoing||[]);
+    } catch (e) {
+      setFriendError(e.message);
+    }
+  };
 
 
   const handleCancel = () => {
@@ -279,7 +477,10 @@ const ProfilePage = ({ navigateToPage }) => {
                           setIsUploading(true);
                           setUploadProgress(0);
                           const res = await axios.post(`http://localhost:5000/api/profile/${userId}/avatar`, form, {
-                            headers: { 'Content-Type': 'multipart/form-data' },
+                            headers: {
+                              'Content-Type': 'multipart/form-data',
+                              ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+                            },
                             onUploadProgress: (pe) => {
                               if (!pe.total) return;
                               const pct = Math.round((pe.loaded / pe.total) * 100);
@@ -403,6 +604,7 @@ const ProfilePage = ({ navigateToPage }) => {
           <TabsList>
             <TabsTrigger value="lists">My Lists</TabsTrigger>
             <TabsTrigger value="statistics">Statistics</TabsTrigger>
+            <TabsTrigger value="friends">Friends</TabsTrigger>
           </TabsList>
 
           {/* Lists tab remains unchanged below */}
@@ -513,7 +715,10 @@ const ProfilePage = ({ navigateToPage }) => {
                       };
                       const res = await fetch('http://localhost:5000/api/profile/updateItemStatus', {
                         method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+                        },
                         body: JSON.stringify(payload),
                       });
                       const data = await res.json();
@@ -541,7 +746,10 @@ const ProfilePage = ({ navigateToPage }) => {
                       };
                       const res = await fetch('http://localhost:5000/api/profile/updateItemMeta', {
                         method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+                        },
                         body: JSON.stringify(payload),
                       });
                       const data = await res.json();
@@ -609,7 +817,10 @@ const ProfilePage = ({ navigateToPage }) => {
                                           };
                                           const res = await fetch('http://localhost:5000/api/profile/deleteItem', {
                                             method: 'DELETE',
-                                            headers: { 'Content-Type': 'application/json' },
+                                            headers: {
+                                              'Content-Type': 'application/json',
+                                              ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+                                            },
                                             body: JSON.stringify(payload),
                                           });
                                           const data = await res.json();
@@ -802,6 +1013,207 @@ const ProfilePage = ({ navigateToPage }) => {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Friends Tab */}
+          <TabsContent value="friends">
+            {/* Handle card on top */}
+            <Card className="mb-6">
+              <CardContent className="p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h3 className="text-white font-semibold">Your Handle</h3>
+                  {isEditing ? (
+                    <Input
+                      placeholder="username"
+                      value={tempProfileData?.username || ""}
+                      onChange={(e) => setTempProfileData({ ...tempProfileData, username: e.target.value })}
+                      className="mt-2"
+                    />
+                  ) : (
+                    <div className="text-gray-300 mt-1">{profileData?.username ? `@${profileData.username}` : <span className="text-white/60">Set a username from Edit Profile</span>}</div>
+                  )}
+                </div>
+                {!isEditing && (
+                  <div className="text-xs text-gray-400">To change your username, click Edit Profile above and save.</div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left rail: Add + Search + List */}
+              <div className="lg:col-span-4 space-y-6">
+                <Card>
+                  <CardContent className="p-6 space-y-4">
+                    <div>
+                      <h3 className="text-white font-semibold">Add a friend</h3>
+                      <div className="mt-2 flex gap-2">
+                        <Input
+                          placeholder="friend's username"
+                          value={friendUsernameInput}
+                          onChange={(e) => setFriendUsernameInput(e.target.value)}
+                        />
+                        <Button type="button" onClick={addFriend}>Add</Button>
+                      </div>
+                      {friendError && <div className="text-red-400 text-sm mt-2">{friendError}</div>}
+                    </div>
+                    <div className="pt-4 border-t border-white/10">
+                      <label className="text-white font-semibold">Find in friends</label>
+                      <div className="relative mt-2">
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-white/50" />
+                        <Input
+                          placeholder="Search by @username or name"
+                          value={friendQuery}
+                          onChange={(e) => setFriendQuery(e.target.value)}
+                          className="pl-9"
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="px-6 pt-4 pb-3 flex items-center justify-between">
+                      <h3 className="text-white font-semibold">Friends</h3>
+                      <span className="text-xs text-white/60">{friends.length} total</span>
+                    </div>
+                    <div className="max-h-[26rem] overflow-auto">
+                      {friendsLoading ? (
+                        <div className="px-6 py-4 text-gray-400">Loading...</div>
+                      ) : (
+                        (() => {
+                          const q = (friendQuery || '').toLowerCase();
+                          const list = friends.filter(f =>
+                            f.username?.toLowerCase().includes(q) || (f.name || '').toLowerCase().includes(q)
+                          );
+                          if (list.length === 0) return <div className="px-6 py-4 text-gray-400">No friends found.</div>;
+                          return (
+                            <ul className="divide-y divide-white/10">
+                              {list.map(f => {
+                                const isActive = friendView?.user?.username === f.username;
+                                const initials = (f.name || f.username || 'FR').substring(0,2).toUpperCase();
+                                return (
+                                  <li key={f.id} className={`px-4 sm:px-6 py-3 flex items-center justify-between gap-3 ${isActive ? 'bg-white/5' : ''}`}>
+                                    <button className="flex items-center gap-3 text-left flex-1" onClick={() => viewFriend(f.username)}>
+                                      <Avatar className="w-9 h-9" src={null}>{initials}</Avatar>
+                                      <div className="min-w-0">
+                                        <div className="text-white text-sm font-medium truncate">@{f.username}</div>
+                                        <div className="text-xs text-white/60 truncate">{f.name}</div>
+                                      </div>
+                                    </button>
+                                    <Button type="button" size="sm" variant="outline" className="border-white/20 text-white hover:bg-white/10" onClick={() => removeFriend(f.username)}>Remove</Button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          );
+                        })()
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Requests */}
+                <Card>
+                  <CardContent className="p-6 space-y-5">
+                    <div>
+                      <h3 className="text-white font-semibold mb-2">Incoming requests</h3>
+                      {incoming.length === 0 ? (
+                        <div className="text-gray-400 text-sm">No incoming requests</div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {incoming.map(r => (
+                            <li key={r.id} className="flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-md p-2">
+                              <div className="min-w-0">
+                                <div className="text-white text-sm font-medium truncate">@{r.username}</div>
+                                <div className="text-xs text-white/60 truncate">{r.name}</div>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button size="sm" className="bg-gradient-to-r from-green-500 to-emerald-500" onClick={() => acceptRequest(r.username)}>Accept</Button>
+                                <Button size="sm" variant="outline" className="border-white/20 text-white hover:bg-white/10" onClick={() => declineRequest(r.username)}>Decline</Button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold mb-2">Outgoing requests</h3>
+                      {outgoing.length === 0 ? (
+                        <div className="text-gray-400 text-sm">No outgoing requests</div>
+                      ) : (
+                        <ul className="space-y-2">
+                          {outgoing.map(r => (
+                            <li key={r.id} className="flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-md p-2">
+                              <div className="min-w-0">
+                                <div className="text-white text-sm font-medium truncate">@{r.username}</div>
+                                <div className="text-xs text-white/60 truncate">{r.name}</div>
+                              </div>
+                              <Button size="sm" variant="outline" className="border-white/20 text-white hover:bg-white/10" onClick={() => cancelOutgoing(r.username)}>Cancel</Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Right panel: friend details */}
+              <div className="lg:col-span-8">
+                <Card>
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-white font-semibold">Friend Details</h3>
+                      {friendView?.user?.username && (
+                        <span className="text-xs text-white/60">Viewing @{friendView.user.username}</span>
+                      )}
+                    </div>
+                    {!friendView ? (
+                      <div className="text-gray-400">
+                        Select a friend from the list to view their profile and items.
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        <div className="flex items-center gap-3">
+                          <Avatar src={friendView.avatarUrl}>{(friendView.user?.name || 'FR').substring(0,2).toUpperCase()}</Avatar>
+                          <div>
+                            <div className="text-white font-semibold">{friendView.user?.name}</div>
+                            <div className="text-white/70 text-sm">@{friendView.user?.username}</div>
+                          </div>
+                        </div>
+                        <div className="text-gray-300">{friendView.bio || 'No bio.'}</div>
+                        <div>
+                          <h4 className="text-white font-semibold mb-2">Items</h4>
+                          {Array.isArray(friendView.lists) && friendView.lists.length > 0 ? (
+                            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3 max-h-[28rem] overflow-auto pr-1">
+                              {friendView.lists.map((li, i) => (
+                                <li key={`${li.url}-${i}`} className="p-3 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between">
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    {li.thumbnail ? (
+                                      <img src={li.thumbnail.replace('http://','https://')} alt={li.name} className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                                    ) : (
+                                      <div className="w-10 h-10 rounded bg-white/10 flex-shrink-0"/>
+                                    )}
+                                    <div className="min-w-0">
+                                      <div className="text-white text-sm font-medium truncate">{li.name}</div>
+                                      <div className="text-xs text-white/60 capitalize truncate">{(li.type||'unknown')}</div>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-white/70 capitalize ml-2">{(li.status||'currently_watching').replace('_',' ')}</div>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="text-gray-400">No items in list.</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

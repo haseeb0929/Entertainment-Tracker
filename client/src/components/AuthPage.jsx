@@ -40,6 +40,7 @@ export default function AuthPage({ navigateToPage = () => { } }) {
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
+    username: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -48,6 +49,8 @@ export default function AuthPage({ navigateToPage = () => { } }) {
   const [errors, setErrors] = useState({})
   const [success, setSuccess] = useState("")
   const [floatingIcons, setFloatingIcons] = useState([])
+  const [usernameStatus, setUsernameStatus] = useState({ state: "idle", suggestions: [], reason: null })
+  const [usernameTimer, setUsernameTimer] = useState(null)
 
   useEffect(() => {
     const icons = Array.from({ length: FLOATING_ICON_COUNT }).map((_, i) => {
@@ -69,6 +72,19 @@ export default function AuthPage({ navigateToPage = () => { } }) {
 
     if (!isLogin && !formData.name.trim()) {
       newErrors.name = "Name is required"
+    }
+
+    if (!isLogin) {
+      const u = (formData.username || "").trim().toLowerCase()
+      if (!u) {
+        newErrors.username = "Username is required"
+      } else if (!/^[a-z0-9_\.]{3,20}$/.test(u)) {
+        newErrors.username = "3-20 chars: letters, numbers, underscore, dot"
+      } else if (usernameStatus.state === 'taken') {
+        newErrors.username = "Username is taken"
+      } else if (usernameStatus.state === 'checking') {
+        newErrors.username = "Checking username..."
+      }
     }
 
     if (!formData.email.trim()) {
@@ -127,7 +143,7 @@ export default function AuthPage({ navigateToPage = () => { } }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name: formData.name, email: formData.email, password: formData.password }),
+        body: JSON.stringify({ name: formData.name, username: formData.username, email: formData.email, password: formData.password }),
       })
       const data = await response.json()
       setIsLoading(false)
@@ -166,7 +182,7 @@ export default function AuthPage({ navigateToPage = () => { } }) {
         setIsLogin(true)
         setSignupRequested(false)
         setVerificationCode("")
-        setFormData({ name: "", email: formData.email, password: "", confirmPassword: "", agreeTerms: false })
+        setFormData({ name: "", username: "", email: formData.email, password: "", confirmPassword: "", agreeTerms: false })
       }, 800)
     } catch (e) {
       setErrors({ general: e.message })
@@ -227,6 +243,26 @@ export default function AuthPage({ navigateToPage = () => { } }) {
     setFormData((prev) => ({ ...prev, [field]: value }))
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: "" }))
+    }
+    if (field === 'username' && !isLogin) {
+      if (usernameTimer) clearTimeout(usernameTimer)
+      const t = setTimeout(async () => {
+        const raw = (value || '').trim()
+        if (raw.length < 3) { setUsernameStatus({ state: 'idle', suggestions: [], reason: null }); return; }
+        setUsernameStatus({ state: 'checking', suggestions: [], reason: null })
+        try {
+          const res = await fetch(`http://localhost:5000/auth/username/check?username=${encodeURIComponent(raw)}`)
+          const data = await res.json()
+          if (data.available) {
+            setUsernameStatus({ state: 'available', suggestions: [], reason: null })
+          } else {
+            setUsernameStatus({ state: 'taken', suggestions: Array.isArray(data.suggestions) ? data.suggestions : [], reason: data.reason || 'taken' })
+          }
+        } catch (_) {
+          setUsernameStatus({ state: 'idle', suggestions: [], reason: null })
+        }
+      }, 350)
+      setUsernameTimer(t)
     }
   }
 
@@ -319,6 +355,42 @@ export default function AuthPage({ navigateToPage = () => { } }) {
                         <AlertCircle className="w-4 h-4" />
                         {errors.name}
                       </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Username Field */}
+                {!isLogin && (
+                  <div className="space-y-2" style={{ animation: "slideIn 0.3s ease-out" }}>
+                    <label className="text-sm font-medium text-gray-300">Username</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">@</span>
+                      <Input
+                        type="text"
+                        placeholder="choose a unique handle"
+                        value={formData.username}
+                        onChange={(e) => handleInputChange("username", e.target.value)}
+                        className={`pl-8 ${errors.username ? "border-red-500" : ""}`}
+                      />
+                    </div>
+                    {usernameStatus.state === 'checking' && (
+                      <p className="text-gray-400 text-sm">Checking availability…</p>
+                    )}
+                    {usernameStatus.state === 'available' && (
+                      <p className="text-green-400 text-sm flex items-center gap-1"><CheckCircle className="w-4 h-4"/> Username is available</p>
+                    )}
+                    {(usernameStatus.state === 'taken' || errors.username) && (
+                      <div className="space-y-1">
+                        <p className="text-red-400 text-sm flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4" />
+                          {errors.username || (usernameStatus.reason === 'invalid' ? 'Invalid username' : 'Username is taken')}
+                        </p>
+                        {usernameStatus.suggestions?.length > 0 && (
+                          <div className="text-xs text-gray-400">Try: {usernameStatus.suggestions.slice(0,3).map((s, i) => (
+                            <button key={s} type="button" className="text-purple-300 hover:underline mr-2" onClick={() => handleInputChange('username', s)}>@{s}</button>
+                          ))}</div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

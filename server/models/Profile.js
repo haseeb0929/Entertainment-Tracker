@@ -78,6 +78,11 @@ const ProfileSchema = new mongoose.Schema(
     stats: { type: StatsSchema, default: () => ({}) },
 
     joinDate: { type: Date, default: Date.now },
+
+    // social graph
+    friends: { type: [ { type: mongoose.Schema.Types.ObjectId, ref: 'User' } ], default: [] },
+    incomingRequests: { type: [ { type: mongoose.Schema.Types.ObjectId, ref: 'User' } ], default: [] },
+    outgoingRequests: { type: [ { type: mongoose.Schema.Types.ObjectId, ref: 'User' } ], default: [] },
   },
   { timestamps: true }
 );
