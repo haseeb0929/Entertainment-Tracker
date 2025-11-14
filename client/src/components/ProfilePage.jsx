@@ -1077,7 +1077,7 @@ const ProfilePage = ({ navigateToPage }) => {
                       <h3 className="text-white font-semibold">Friends</h3>
                       <span className="text-xs text-white/60">{friends.length} total</span>
                     </div>
-                    <div className="max-h-[26rem] overflow-auto">
+                    <div className="max-h-[26rem] overflow-auto friends-scroll">
                       {friendsLoading ? (
                         <div className="px-6 py-4 text-gray-400">Loading...</div>
                       ) : (
@@ -1092,16 +1092,39 @@ const ProfilePage = ({ navigateToPage }) => {
                               {list.map(f => {
                                 const isActive = friendView?.user?.username === f.username;
                                 const initials = (f.name || f.username || 'FR').substring(0,2).toUpperCase();
+                                const baseItem = "relative px-4 sm:px-6 py-3 flex items-center justify-between gap-3 transition-all duration-200";
+                                const hoverItem = "hover:bg-white/5";
                                 return (
-                                  <li key={f.id} className={`px-4 sm:px-6 py-3 flex items-center justify-between gap-3 ${isActive ? 'bg-white/5' : ''}`}>
-                                    <button className="flex items-center gap-3 text-left flex-1" onClick={() => viewFriend(f.username)}>
+                                  <li key={f.id} className={`${baseItem} ${hoverItem}`}>
+                                    {isActive && (
+                                      <div className="absolute inset-0 rounded-lg bg-white/10 ring-1 ring-purple-400/30 shadow-lg shadow-purple-500/20 pointer-events-none" />
+                                    )}
+                                    <div
+                                      className="relative z-10 flex items-center gap-3 text-left flex-1 cursor-pointer"
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => viewFriend(f.username)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); viewFriend(f.username); } }}
+                                    >
+                                      {/* Left accent bar for selected state */}
+                                      <div className={`h-8 w-1 rounded-full ${isActive ? 'bg-gradient-to-b from-purple-500 to-pink-500' : 'bg-transparent'}`}></div>
                                       <Avatar className="w-9 h-9" src={null}>{initials}</Avatar>
-                                      <div className="min-w-0">
+                                      <div className="min-w-0 flex-1">
                                         <div className="text-white text-sm font-medium truncate">@{f.username}</div>
                                         <div className="text-xs text-white/60 truncate">{f.name}</div>
+                                        <div className="mt-2">
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-white/20 text-white hover:bg-white/10"
+                                            onClick={(e) => { e.stopPropagation(); removeFriend(f.username); }}
+                                          >
+                                            Remove
+                                          </Button>
+                                        </div>
                                       </div>
-                                    </button>
-                                    <Button type="button" size="sm" variant="outline" className="border-white/20 text-white hover:bg-white/10" onClick={() => removeFriend(f.username)}>Remove</Button>
+                                    </div>
                                   </li>
                                 );
                               })}

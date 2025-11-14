@@ -1,6 +1,8 @@
 import axios from "axios";
 import express from "express";
 import getSpotifyToken from "../utils/spotify.js";
+import Profile from "../models/Profile.js";
+import User from "../models/User.js";
 const router = express.Router();
 
 // 🔹 Country → Region mapper
@@ -231,6 +233,79 @@ router.get("/items", async (req, res) => {
         console.error(error);
         res.status(500)
         return res.json({ error: error.message });
+    }
+});
+
+// Public reviews for an item aggregated across user profiles
+router.get("/reviews", async (req, res) => {
+    try {
+        const { externalId, url, name, type } = req.query;
+
+        if (!externalId && !url && !(name && type)) {
+            res.status(400);
+            return res.json({ msg: "Provide externalId, or url, or name+type to fetch reviews." });
+        }
+
+        const orConds = [];
+        if (externalId) orConds.push({ externalId: String(externalId) });
+        if (url) orConds.push({ url: String(url) });
+        if (name && type) {
+            // case-insensitive name match and exact type
+            const safe = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            orConds.push({ name: { $regex: new RegExp(`^${safe}$`, "i") }, type: String(type) });
+        }
+
+        // find profiles with at least one matching list item having a non-empty review
+        const profiles = await Profile.find({
+            lists: {
+                $elemMatch: {
+                    review: { $exists: true, $ne: "" },
+                    $or: orConds,
+                },
+            },
+        }).populate({ path: "userId", select: "username name verified" });
+
+        const reviews = [];
+        for (const p of profiles) {
+            const user = p.userId;
+            // Optionally include only verified users' comments
+            if (!user || user.verified === false) continue;
+            for (const li of p.lists || []) {
+                if (!li.review || li.review === "") continue;
+                const matches = (
+                    (externalId && li.externalId && String(li.externalId) === String(externalId)) ||
+                    (url && li.url && String(li.url) === String(url)) ||
+                    ((name && type) && li.name && li.type &&
+                        String(li.type) === String(type) &&
+                        String(li.name).toLowerCase() === String(name).toLowerCase())
+                );
+                if (!matches) continue;
+                reviews.push({
+                    user: {
+                        id: user._id,
+                        username: user.username,
+                        name: user.name,
+                    },
+                    avatarUrl: p.avatarUrl || "",
+                    rating: typeof li.rating === "number" ? li.rating : 0,
+                    review: li.review,
+                    rewatchCount: li.rewatchCount || 0,
+                    status: li.status || "currently_watching",
+                    type: li.type || "unknown",
+                    name: li.name,
+                });
+            }
+        }
+
+        // sort by rating desc then by username
+        reviews.sort((a, b) => (b.rating || 0) - (a.rating || 0) || String(a.user.username || "").localeCompare(String(b.user.username || "")));
+
+        res.status(200);
+        return res.json({ count: reviews.length, reviews });
+    } catch (err) {
+        console.error(err);
+        res.status(500);
+        return res.json({ msg: "Failed to fetch reviews", error: err.message });
     }
 });
 

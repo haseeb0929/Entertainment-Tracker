@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowLeft,
   Film,
@@ -30,6 +30,9 @@ const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {
   const { auth } = useAuth();
   const [details] = useState(item || null);
   const [error, setError] = useState(null);
+  const [pubReviews, setPubReviews] = useState([]);
+  const [pubLoading, setPubLoading] = useState(false);
+  const [pubError, setPubError] = useState(null);
 
   if (!details) {
     return (
@@ -82,6 +85,31 @@ const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {
       setError(err.message);
     }
   };
+
+  // Fetch public reviews for this item (aggregated from all users)
+  useEffect(() => {
+    if (!details) return;
+    setPubLoading(true);
+    setPubError(null);
+    try {
+      const params = new URLSearchParams();
+      if (details.id) params.append("externalId", details.id);
+      if (details.url) params.append("url", details.url);
+      if (details.title) params.append("name", details.title);
+      if (details.type) params.append("type", details.type);
+      fetch(`http://localhost:5000/getItemsOf/reviews?${params.toString()}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d && Array.isArray(d.reviews)) setPubReviews(d.reviews);
+          else setPubReviews([]);
+        })
+        .catch(err => setPubError(err.message || 'Failed to load comments'))
+        .finally(() => setPubLoading(false));
+    } catch (e) {
+      setPubError(e.message);
+      setPubLoading(false);
+    }
+  }, [details]);
 
   return (
     <div className="min-h-screen bg-slate-950 relative overflow-hidden text-white">
@@ -183,6 +211,57 @@ const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {
             {error}
           </div>
         )}
+
+        {/* Public Comments */}
+        <div className="mt-14">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-2xl font-semibold text-white">Public comments</h3>
+            <span className="text-sm text-white/60">{pubReviews.length} total</span>
+          </div>
+          <div className="space-y-3">
+            {pubLoading ? (
+              <div className="text-gray-400">Loading comments...</div>
+            ) : pubError ? (
+              <div className="text-red-400">{pubError}</div>
+            ) : pubReviews.length === 0 ? (
+              <div className="text-gray-400">No public comments yet.</div>
+            ) : (
+              pubReviews.map((rv, idx) => (
+                <div key={idx} className="p-4 rounded-xl bg-white/5 border border-white/10 flex gap-4">
+                  {/* Avatar */}
+                  {rv.avatarUrl ? (
+                    <img src={rv.avatarUrl} alt={rv.user?.username || 'user'} className="w-10 h-10 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-sm font-semibold">
+                      {(rv.user?.name || rv.user?.username || 'U').substring(0,2).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-white font-medium truncate">{rv.user?.name || 'Anonymous'}</div>
+                        <div className="text-xs text-white/70 truncate">@{rv.user?.username || 'user'}</div>
+                      </div>
+                      {/* Rating */}
+                      <div className="flex items-center gap-1 text-yellow-400 flex-shrink-0">
+                        {[1,2,3,4,5].map(n => (
+                          <Star key={n} className={`w-4 h-4 ${n <= (rv.rating || 0) ? 'fill-current' : 'opacity-30'}`} />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="mt-2 text-gray-200 whitespace-pre-wrap break-words">{rv.review}</div>
+                    <div className="mt-2 text-xs text-white/60 flex items-center gap-3">
+                      <span className="capitalize">Status: {(rv.status || 'currently_watching').replace('_',' ')}</span>
+                      {typeof rv.rewatchCount === 'number' && rv.rewatchCount > 0 && (
+                        <span>Rewatches: {rv.rewatchCount}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
         {/* Back Button */}
         <div className="mt-20 flex justify-center">
