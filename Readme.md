@@ -20,10 +20,7 @@ It solves the problem of managing entertainment lists by allowing users to organ
 2. Navigate to project folder
 3. For frontend-only: Open `index.html` in browser  
    For fullstack: Run `npm install && npm start` for frontend and backend
-4. Ensure the database server is running (if backend exists)
-
-## Screenshots
-_Add screenshots of the dashboard, adding items, etc._
+4. Ensure the database server is running 
 
 ## Results / Key Points
 - Helps users track entertainment effectively
