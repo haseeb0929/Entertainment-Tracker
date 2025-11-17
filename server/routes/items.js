@@ -33,6 +33,250 @@ const countryToRegion = (countryCode) => {
     return regions[countryCode] || "Other";
 };
 
+// Simple in-memory cache with TTL
+const cache = new Map(); // key -> { data, expiresAt }
+const getCache = (key) => {
+    const hit = cache.get(key);
+    if (!hit) return null;
+    if (Date.now() > hit.expiresAt) {
+        cache.delete(key);
+        return null;
+    }
+    return hit.data;
+};
+const setCache = (key, data, ttlMs = 2 * 60 * 1000) => {
+    cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+};
+
+// Fetch wrapper with timeout and limited retries
+async function fetchJsonWithRetry(url, options = {}, { retries = 1, timeoutMs = 8000 } = {}) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(timer);
+            if (!res.ok) {
+                const text = await res.text().catch(() => "");
+                throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+            }
+            return await res.json();
+        } catch (err) {
+            clearTimeout(timer);
+            if (attempt === retries) throw err;
+            await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        }
+    }
+}
+
+// Helpers used for the "all" aggregator
+async function _moviesFromTMDB(search, genre, region) {
+    const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
+    const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
+    const genreResp = await fetch(`https://api.themoviedb.org/3/genre/movie/list?api_key=${TMDB_KEY}&language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
+    const genreJson = await genreResp.json();
+    const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+    let url;
+    const params = new URLSearchParams();
+    if (search && search.trim() !== "" && search !== "react") {
+        url = "https://api.themoviedb.org/3/search/movie";
+        params.set("query", search);
+        params.set("include_adult", "false");
+        params.set("language", "en-US");
+        params.set("page", "1");
+    } else {
+        url = "https://api.themoviedb.org/3/discover/movie";
+        params.set("language", "en-US");
+        params.set("page", "1");
+        params.set("sort_by", "popularity.desc");
+    }
+    if (genre && genre.toLowerCase() !== "all") {
+        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+        if (entry) params.set("with_genres", String(entry[0]));
+    }
+    const tmdbRes = await fetch(`${url}?${params.toString()}`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
+    const tmdbData = await tmdbRes.json();
+    const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
+    let out = results.map((m) => {
+        const country = (m.origin_country && m.origin_country[0]) || "Unknown";
+        const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
+        const backdrop = m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : poster;
+        const gname = (m.genre_ids && m.genre_ids.length > 0) ? (genreMap.get(m.genre_ids[0]) || "Unknown") : "Unknown";
+        return {
+            id: m.id,
+            type: "movies",
+            title: m.title || m.original_title || "Unknown Title",
+            rating: typeof m.vote_average === "number" ? Number(m.vote_average.toFixed(1)) : 0,
+            genre: gname,
+            region: countryToRegion(country),
+            country,
+            trending: Boolean(m.popularity && m.popularity > 100),
+            thumbnail: poster || backdrop,
+            description: m.overview || "",
+            language: m.original_language || undefined,
+        };
+    });
+    if (region && region.toLowerCase() !== "all") {
+        out = out.filter((m) => m.region.toLowerCase() === region.toLowerCase());
+    }
+    return out;
+}
+
+async function _seriesFromTMDB(search, genre, region) {
+    const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
+    const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
+    const genreResp = await fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${TMDB_KEY}&language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
+    const genreJson = await genreResp.json();
+    const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+    let url;
+    const params = new URLSearchParams();
+    if (search && search.trim() !== "" && search !== "react") {
+        url = "https://api.themoviedb.org/3/search/tv";
+        params.set("query", search);
+        params.set("include_adult", "false");
+        params.set("language", "en-US");
+        params.set("page", "1");
+    } else {
+        url = "https://api.themoviedb.org/3/discover/tv";
+        params.set("language", "en-US");
+        params.set("page", "1");
+        params.set("sort_by", "popularity.desc");
+    }
+    if (genre && genre.toLowerCase() !== "all") {
+        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+        if (entry) params.set("with_genres", String(entry[0]));
+    }
+    const tmdbRes = await fetch(`${url}?${params.toString()}`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
+    const tmdbData = await tmdbRes.json();
+    const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
+    let out = results.map((t) => {
+        const country = (t.origin_country && t.origin_country[0]) || "Unknown";
+        const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
+        const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
+        const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Unknown") : "Unknown";
+        return {
+            id: t.id,
+            type: "series",
+            title: t.name || t.original_name || "Unknown Title",
+            rating: typeof t.vote_average === "number" ? Number(t.vote_average.toFixed(1)) : 0,
+            genre: gname,
+            region: countryToRegion(country),
+            country,
+            trending: Boolean(t.popularity && t.popularity > 100),
+            thumbnail: poster || backdrop,
+            description: t.overview || "",
+            language: t.original_language || undefined,
+        };
+    });
+    if (region && region.toLowerCase() !== "all") {
+        out = out.filter((m) => m.region.toLowerCase() === region.toLowerCase());
+    }
+    return out;
+}
+
+async function _booksFromGoogle(search, genre, region) {
+    const key = `books:${search || ''}:${genre || 'all'}:${region || 'all'}`;
+    const cached = getCache(key);
+    if (cached) return cached;
+    const fields = encodeURIComponent("items(id,volumeInfo/title,volumeInfo/averageRating,volumeInfo/categories,volumeInfo/imageLinks/thumbnail,volumeInfo/authors,volumeInfo/description),items/saleInfo/country");
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(search || 'react')}&maxResults=32&fields=${fields}`;
+    const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 7000 });
+    let out = (data.items || []).map((item) => {
+        const country = item.saleInfo?.country || "Unknown";
+        return {
+            id: item.id,
+            type: "books",
+            title: item.volumeInfo.title || "Unknown Title",
+            rating: item.volumeInfo.averageRating || 0,
+            genre: item.volumeInfo.categories?.[0] || "Unknown",
+            region: countryToRegion(country),
+            country,
+            trending: false,
+            thumbnail: item.volumeInfo.imageLinks?.thumbnail || "",
+            authors: item.volumeInfo.authors || [],
+            description: item.volumeInfo.description || "",
+        };
+    });
+    if (genre && genre.toLowerCase() !== "all") {
+        out = out.filter((b) => (b.genre || '').toLowerCase() === genre.toLowerCase());
+    }
+    if (region && region.toLowerCase() !== "all") {
+        out = out.filter((b) => (b.region || '').toLowerCase() === region.toLowerCase());
+    }
+    setCache(key, out);
+    return out;
+}
+
+async function _gamesFromRawg(search, genre) {
+    const apiKey = "decd56d444eb4de18699c2f950138a5b";
+    const key = `games:${search || ''}:${genre || 'all'}`;
+    const cached = getCache(key);
+    if (cached) return cached;
+    let url = `https://api.rawg.io/api/games?key=${apiKey}&page_size=40`;
+    if (search && search.trim() !== "" && search !== "react") url += `&search=${encodeURIComponent(search)}`;
+    if (genre && genre.toLowerCase() !== "all") url += `&genre=${encodeURIComponent(genre)}`;
+    const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 8000 });
+    let out = (data.results || []).map((item) => ({
+        id: item.id,
+        type: "games",
+        title: item.name || "Unknown Title",
+        rating: item.rating || 0,
+        genre: item.genres?.[0]?.name || "Unknown",
+        region: "Global",
+        country: "Unknown",
+        trending: false,
+        thumbnail: item.background_image || "",
+        description: item.description || "",
+        released: item.released || "",
+        platforms: item.platforms ? item.platforms.map((p) => p.platform.name) : [],
+        esrb: item.esrb_rating?.name || "Not Rated",
+    }));
+    if (genre && genre.toLowerCase() !== "all") out = out.filter((g) => (g.genre || '').toLowerCase() === genre.toLowerCase());
+    setCache(key, out);
+    return out;
+}
+
+async function _musicFromSpotify(search) {
+    const key = `music:${search || ''}`;
+    const cached = getCache(key);
+    if (cached) return cached;
+    const token = await getSpotifyToken();
+    const q = (!search || search === 'react') ? 'Alan walker' : search;
+    const url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=20`;
+    const source = axios.CancelToken.source();
+    const timer = setTimeout(() => source.cancel("timeout"), 8000);
+    try {
+        const response = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, cancelToken: source.token });
+        const tracksArray = response.data?.tracks?.items || [];
+        const out = tracksArray.map(track => {
+            const album = track.album;
+            const artistNames = track.artists.map(a => a.name);
+            return {
+                id: track.id,
+                type: "music",
+                title: track.name,
+                rating: track.popularity || 0,
+                genre: "Unknown",
+                region: "Global",
+                country: "Unknown",
+                trending: (track.popularity || 0) > 70,
+                thumbnail: album.images[0]?.url || "",
+                description: album.name || "",
+                artists: artistNames,
+                album: album.name,
+                release_date: album.release_date,
+                preview_url: track.preview_url,
+                spotifyUrl: track.external_urls.spotify,
+                popularity: track.popularity
+            };
+        });
+        setCache(key, out);
+        return out;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 router.get("/items", async (req, res) => {
     let { search, type, genre, region } = req.query;
     if (!search || search.trim() === "") {
@@ -42,11 +286,16 @@ router.get("/items", async (req, res) => {
     try {
         // ========== BOOKS ==========
         if (type === "books") {
-            const response = await axios.get(
-                `https://www.googleapis.com/books/v1/volumes?q=${search}&maxResults=40&key=AIzaSyAfE1xHB3BtljtR3r-WN2bg9siQpH64B48`
-            );
+            const key = `books:${search || ''}:${genre || 'all'}:${region || 'all'}`;
+            const cached = getCache(key);
+            if (cached) { res.status(200); return res.json(cached); }
 
-            let filteredBooks = (response.data.items || []).map((item) => {
+            // Limit fields to reduce payload size
+            const fields = encodeURIComponent("items(id,volumeInfo/title,volumeInfo/averageRating,volumeInfo/categories,volumeInfo/imageLinks/thumbnail,volumeInfo/authors,volumeInfo/description),items/saleInfo/country");
+            const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(search)}&maxResults=32&fields=${fields}`;
+            const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 7000 });
+
+            let filteredBooks = (data.items || []).map((item) => {
                 const country = item.saleInfo?.country || "Unknown";
                 return {
                     id: item.id,
@@ -73,76 +322,165 @@ router.get("/items", async (req, res) => {
                     (b) => b.region.toLowerCase() === region.toLowerCase()
                 );
             }
+            setCache(key, filteredBooks);
             res.status(200);
             return res.json(filteredBooks);
         }
 
-        // ========== MOVIES ==========
+        // ========== MOVIES (TMDB) ==========
         if (type === "movies") {
+            const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
+            const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
+
+            // Fetch genre list map for movies
+            const genreResp = await fetch(`https://api.themoviedb.org/3/genre/movie/list?api_key=${TMDB_KEY}&language=en-US`, {
+                headers: { Authorization: `Bearer ${TMDB_TOKEN}` }
+            });
+            const genreJson = await genreResp.json();
+            const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+
             let url;
-            let flag = true;
+            const params = new URLSearchParams();
+            // Search or discover
             if (search && search.trim() !== "" && search !== "react") {
-                if (genre && genre.toLowerCase() !== "all") {
-                    url = `https://imdb236.p.rapidapi.com/api/imdb/search?type=movie&originalTitle=${search}&genre=${genre}&rows=25&sortOrder=ASC&sortField=id`;
-                } else {
-                    url = `https://imdb236.p.rapidapi.com/api/imdb/search?type=movie&originalTitle=${search}&rows=25&sortOrder=ASC&sortField=id`;
-                }
+                url = "https://api.themoviedb.org/3/search/movie";
+                params.set("query", search);
+                params.set("include_adult", "false");
+                params.set("language", "en-US");
+                params.set("page", "1");
             } else {
-                url = "https://imdb236.p.rapidapi.com/api/imdb/cast/nm0000190/titles"; // fallback
+                url = "https://api.themoviedb.org/3/discover/movie";
+                params.set("language", "en-US");
+                params.set("page", "1");
+                params.set("sort_by", "popularity.desc");
             }
 
-            const options = {
-                method: "GET",
-                headers: {
-                    "x-rapidapi-key": "53744574b1msh746951879fe4261p191de7jsn3f3f40ebfad8",
-                    "x-rapidapi-host": "imdb236.p.rapidapi.com",
-                },
-            };
+            // Optional filters
+            if (genre && genre.toLowerCase() !== "all") {
+                // find genre id by name (case-insensitive)
+                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+                if (entry) params.set("with_genres", String(entry[0]));
+            }
 
-            const response = await fetch(url, options);
-            const data = await response.json();
+            const tmdbRes = await fetch(`${url}?${params.toString()}`, {
+                headers: { Authorization: `Bearer ${TMDB_TOKEN}` }
+            });
+            const tmdbData = await tmdbRes.json();
+            const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
 
-            const moviesArray = Array.isArray(data.results)
-                ? data.results
-                : Array.isArray(data)
-                    ? data
-                    : [];
-
-            let filteredMovies = moviesArray.map((item) => {
-                const country =
-                    (item.countriesOfOrigin && item.countriesOfOrigin[0]) || "Unknown";
+            let out = results.map((m) => {
+                const country = (m.origin_country && m.origin_country[0]) || "Unknown";
+                const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
+                const backdrop = m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : poster;
+                const gname = (m.genre_ids && m.genre_ids.length > 0) ? (genreMap.get(m.genre_ids[0]) || "Unknown") : "Unknown";
                 return {
-                    id: item.id,
+                    id: m.id,
                     type: "movies",
-                    title: item.primaryTitle || item.originalTitle || "Unknown Title",
-                    rating: item.averageRating || 0,
-                    genre: item.genres?.[0] || "Unknown",
+                    title: m.title || m.original_title || "Unknown Title",
+                    rating: typeof m.vote_average === "number" ? Number(m.vote_average.toFixed(1)) : 0,
+                    genre: gname,
                     region: countryToRegion(country),
                     country,
-                    trending: false,
-                    thumbnail: item.primaryImage || "",
-                    description: item.description || "",
-                };
+                    trending: Boolean(m.popularity && m.popularity > 100),
+                    thumbnail: poster || backdrop,
+                    description: m.overview || "",
+                    language: m.original_language || undefined,
+                  };
             });
 
-            if (genre && genre.toLowerCase() !== "all") {
-                filteredMovies = filteredMovies.filter(
-                    (m) => m.genre.toLowerCase() === genre.toLowerCase()
-                );
-            }
             if (region && region.toLowerCase() !== "all") {
-                filteredMovies = filteredMovies.filter(
-                    (m) => m.region.toLowerCase() === region.toLowerCase()
-                );
+                out = out.filter((m) => m.region.toLowerCase() === region.toLowerCase());
             }
-            res.status(200)
-            return res.json(filteredMovies);
+            res.status(200);
+            return res.json(out);
+        }
+
+        // ========== SERIES (TMDB TV) ==========
+        if (type === "series") {
+            const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
+            const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
+
+            // Fetch genre list map for TV
+            const genreResp = await fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${TMDB_KEY}&language=en-US`, {
+                headers: { Authorization: `Bearer ${TMDB_TOKEN}` }
+            });
+            const genreJson = await genreResp.json();
+            const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+
+            let url;
+            const params = new URLSearchParams();
+            if (search && search.trim() !== "" && search !== "react") {
+                url = "https://api.themoviedb.org/3/search/tv";
+                params.set("query", search);
+                params.set("include_adult", "false");
+                params.set("language", "en-US");
+                params.set("page", "1");
+            } else {
+                url = "https://api.themoviedb.org/3/discover/tv";
+                params.set("language", "en-US");
+                params.set("page", "1");
+                params.set("sort_by", "popularity.desc");
+            }
+
+            if (genre && genre.toLowerCase() !== "all") {
+                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+                if (entry) params.set("with_genres", String(entry[0]));
+            }
+
+            const tmdbRes = await fetch(`${url}?${params.toString()}`, {
+                headers: { Authorization: `Bearer ${TMDB_TOKEN}` }
+            });
+            const tmdbData = await tmdbRes.json();
+            const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
+
+            let out = results.map((t) => {
+                const country = (t.origin_country && t.origin_country[0]) || "Unknown";
+                const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
+                const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
+                const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Unknown") : "Unknown";
+                return {
+                    id: t.id,
+                    type: "series",
+                    title: t.name || t.original_name || "Unknown Title",
+                    rating: typeof t.vote_average === "number" ? Number(t.vote_average.toFixed(1)) : 0,
+                    genre: gname,
+                    region: countryToRegion(country),
+                    country,
+                    trending: Boolean(t.popularity && t.popularity > 100),
+                    thumbnail: poster || backdrop,
+                    description: t.overview || "",
+                    language: t.original_language || undefined,
+                  };
+            });
+
+            if (region && region.toLowerCase() !== "all") {
+                out = out.filter((m) => m.region.toLowerCase() === region.toLowerCase());
+            }
+            res.status(200);
+            return res.json(out);
+        }
+
+        // ========== ALL (aggregate) ==========
+        if (type === "all") {
+            const [mv, tv, bk, gm, mu] = await Promise.all([
+                _moviesFromTMDB(search, genre, region).catch(() => []),
+                _seriesFromTMDB(search, genre, region).catch(() => []),
+                _booksFromGoogle(search, genre, region).catch(() => []),
+                _gamesFromRawg(search, genre).catch(() => []),
+                _musicFromSpotify(search).catch(() => []),
+            ]);
+            const combined = [...mv, ...tv, ...bk, ...gm, ...mu];
+            res.status(200);
+            return res.json(combined);
         }
 
         // ========== GAMES ==========
         if (type === "games") {
             const apiKey = "decd56d444eb4de18699c2f950138a5b";
-            let url = `https://api.rawg.io/api/games?key=${apiKey}&page_size=100`;
+            const key = `games:${search || ''}:${genre || 'all'}`;
+            const cached = getCache(key);
+            if (cached) { res.status(200); return res.json(cached); }
+            let url = `https://api.rawg.io/api/games?key=${apiKey}&page_size=40`;
 
             if (search && search.trim() !== "" && search !== "react") {
                 url += `&search=${encodeURIComponent(search)}`;
@@ -151,8 +489,7 @@ router.get("/items", async (req, res) => {
                 url += `&genre=${encodeURIComponent(genre)}`;
             }
 
-            const response = await fetch(url);
-            const data = await response.json();
+            const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 8000 });
             let filteredGames = (data.results || []).map((item) => ({
                 id: item.id,
                 type: "games",
@@ -177,6 +514,7 @@ router.get("/items", async (req, res) => {
                 );
             }
 
+            setCache(key, filteredGames);
             res.status(200)
             return res.json(filteredGames);
         }
@@ -185,15 +523,20 @@ router.get("/items", async (req, res) => {
             try {
                 const token = await getSpotifyToken();
                 if(search && search === "react") search = "Alan walker"; // fallback artist
+                const key = `music:${search || ''}`;
+                const cached = getCache(key);
+                if (cached) { res.status(200); return res.json(cached); }
 
                 let url = `https://api.spotify.com/v1/search?q=${encodeURIComponent(search)}&type=track&limit=20`;
 
-                // Call Spotify API
+                // Call Spotify API with timeout
+                const source = axios.CancelToken.source();
+                const timer = setTimeout(() => source.cancel("timeout"), 8000);
                 const response = await axios.get(url, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                console.log(response.data.tracks);
-                const tracksArray = response.data.tracks?.items || [];
+                    headers: { Authorization: `Bearer ${token}` },
+                    cancelToken: source.token,
+                }).finally(() => clearTimeout(timer));
+                const tracksArray = response.data?.tracks?.items || [];
 
                 let filteredMusic = tracksArray.map(track => {
                     const album = track.album;
@@ -216,6 +559,7 @@ router.get("/items", async (req, res) => {
                 // (optional) filter by genre — Spotify doesn’t give genre per track directly,
                 // only at the artist level. You’d need to fetch artist genre if you want this.
 
+                setCache(key, filteredMusic);
                 res.status(200);
                 return res.json(filteredMusic);
             } catch (error) {
@@ -306,6 +650,137 @@ router.get("/reviews", async (req, res) => {
         console.error(err);
         res.status(500);
         return res.json({ msg: "Failed to fetch reviews", error: err.message });
+    }
+});
+
+// AI-powered mood recommendations (heuristic + personalization)
+router.get("/recommendations", async (req, res) => {
+    try {
+        let { mood = "chill", types = "all", limit = 24, userId, q } = req.query;
+        mood = String(mood).toLowerCase();
+        limit = Math.max(1, Math.min(100, parseInt(limit, 10) || 24));
+
+        const typeList = (types && types !== 'all')
+            ? String(types).split(',').map(t => t.trim()).filter(Boolean)
+            : ["movies","series","books","games","music"];
+
+        // Map moods to genres/queries per type
+        const moodMap = {
+            chill: {
+                movies: { genre: "Drama" },
+                series: { genre: "Drama" },
+                books: { search: "contemporary fiction" },
+                games: { genre: "Indie" },
+                music: { search: "lofi chill" },
+            },
+            excited: {
+                movies: { genre: "Action" },
+                series: { genre: "Action" },
+                books: { search: "action thriller" },
+                games: { genre: "Action" },
+                music: { search: "energetic workout" },
+            },
+            romantic: {
+                movies: { genre: "Romance" },
+                series: { genre: "Romance" },
+                books: { search: "romance novel" },
+                games: { genre: "Casual" },
+                music: { search: "romantic ballad" },
+            },
+            dark: {
+                movies: { genre: "Thriller" },
+                series: { genre: "Thriller" },
+                books: { search: "dark mystery" },
+                games: { genre: "Horror" },
+                music: { search: "dark ambient" },
+            },
+            inspirational: {
+                movies: { genre: "Documentary" },
+                series: { genre: "Documentary" },
+                books: { search: "self help motivational" },
+                games: { genre: "Adventure" },
+                music: { search: "uplifting instrumental" },
+            },
+            funny: {
+                movies: { genre: "Comedy" },
+                series: { genre: "Comedy" },
+                books: { search: "humor satire" },
+                games: { genre: "Casual" },
+                music: { search: "feel good pop" },
+            },
+            nostalgic: {
+                movies: { genre: "Family" },
+                series: { genre: "Family" },
+                books: { search: "classic literature" },
+                games: { genre: "Puzzle" },
+                music: { search: "80s hits" },
+            },
+            focus: {
+                movies: { genre: "Documentary" },
+                series: { genre: "Documentary" },
+                books: { search: "nonfiction science" },
+                games: { genre: "Strategy" },
+                music: { search: "lofi beats to study" },
+            },
+        };
+        const profile = moodMap[mood] || moodMap.chill;
+
+        // Personalization: exclude items already in user's list (if provided)
+        let ownedExternal = new Set();
+        let ownedKey = new Set();
+        if (userId) {
+            try {
+                const me = await Profile.findOne({ userId }).lean();
+                if (me && Array.isArray(me.lists)) {
+                    for (const li of me.lists) {
+                        if (li.externalId) ownedExternal.add(String(li.externalId));
+                        const key = `${(li.name||'').toLowerCase()}|${(li.type||'unknown').toLowerCase()}`;
+                        ownedKey.add(key);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        const tasks = [];
+        const addTask = (fn) => tasks.push(fn);
+
+        const seed = (fallback) => (q && String(q).trim().length >= 3) ? String(q) : fallback;
+
+        if (typeList.includes('movies')) addTask(async () => _moviesFromTMDB('', profile.movies?.genre || 'all', 'all'));
+        if (typeList.includes('series')) addTask(async () => _seriesFromTMDB('', profile.series?.genre || 'all', 'all'));
+        if (typeList.includes('books')) addTask(async () => _booksFromGoogle(seed(profile.books?.search || mood), 'all', 'all'));
+        if (typeList.includes('games')) addTask(async () => _gamesFromRawg('', profile.games?.genre || 'all'));
+        if (typeList.includes('music')) addTask(async () => _musicFromSpotify(seed(profile.music?.search || mood)));
+
+        const results = await Promise.all(tasks.map(t => t().catch(() => [])));
+        let combined = results.flat();
+
+        // Filter out owned
+        combined = combined.filter(it => {
+            if (it.externalId && ownedExternal.has(String(it.externalId))) return false;
+            const key = `${(it.title||'').toLowerCase()}|${(it.type||'unknown').toLowerCase()}`;
+            if (ownedKey.has(key)) return false;
+            return true;
+        });
+
+        // Score and sort (rating/popularity)
+        const score = (it) => {
+            if (typeof it.rating === 'number' && it.rating > 0) return it.rating;
+            if (typeof it.popularity === 'number') return it.popularity / 10;
+            return 0;
+        };
+        combined.sort((a,b) => score(b) - score(a));
+
+        // Limit overall, but keep a balanced mix if possible
+        const max = limit;
+        const slice = combined.slice(0, max);
+
+        res.status(200);
+        return res.json(slice);
+    } catch (err) {
+        console.error(err);
+        res.status(500);
+        return res.json({ msg: "Failed to generate recommendations", error: err.message });
     }
 });
 

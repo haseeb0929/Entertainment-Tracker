@@ -34,6 +34,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
   const [selectedType, setSelectedType] = useState("all")
   const [selectedGenre, setSelectedGenre] = useState("all")
   const [selectedRegion, setSelectedRegion] = useState("all")
+  const [selectedMood, setSelectedMood] = useState("none")
 
   const [items, setItems] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -59,23 +60,49 @@ const HomePage = ({ navigateToPage = () => { } }) => {
   }).toString()
 
   useEffect(() => {
-    setIsLoading(true)
-    setError(null)
-    fetch(`http://localhost:5000/getItemsOf/items?${query}`, { method: "GET" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Request failed: ${res.status}`)
-        return res.json()
-      })
-      .then((data) => {
-        console.log("Fetched items:", data)  // Debug log
-        setItems(Array.isArray(data) ? data : [])
-      })
-      .catch((err) => {
-        setError("Failed to load content")
-        setItems([])
-      })
-      .finally(() => setIsLoading(false))
-  }, [query])
+    let mounted = true;
+    const controller = new AbortController();
+    const load = async () => {
+      setIsLoading(true);
+      setError(null);
+      const url = selectedMood && selectedMood !== 'none'
+        ? (() => {
+            const p = new URLSearchParams();
+            p.set('mood', selectedMood);
+            p.set('types', selectedType || 'all');
+            p.set('limit', '28');
+            if (debouncedSearch && debouncedSearch.length >= 3) p.set('q', debouncedSearch);
+            return `http://localhost:5000/getItemsOf/recommendations?${p.toString()}`;
+          })()
+        : `http://localhost:5000/getItemsOf/items?${query}`;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        try {
+          const res = await fetch(url, { method: "GET", signal: controller.signal });
+          clearTimeout(timeout);
+          if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+          const data = await res.json();
+          if (!mounted) return;
+          setItems(Array.isArray(data) ? data : []);
+          setIsLoading(false);
+          return; // success
+        } catch (err) {
+          clearTimeout(timeout);
+          if (attempt === 1) {
+            if (!mounted) return;
+            setError("Failed to load content");
+            setItems([]);
+            setIsLoading(false);
+          } else {
+            // brief backoff before retry
+            await new Promise((r) => setTimeout(r, 400));
+          }
+        }
+      }
+    };
+    load();
+    return () => { mounted = false; controller.abort(); };
+  }, [query, selectedMood, debouncedSearch, selectedType])
 
   // ✅ Improved handler with logging, fallbacks, and unified popup
   const handleAddToList = async (item) => {
@@ -234,7 +261,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Select
                   value={selectedType}
                   onValueChange={setSelectedType}
@@ -275,6 +302,23 @@ const HomePage = ({ navigateToPage = () => { } }) => {
                       {region}
                     </option>
                   ))}
+                </Select>
+
+                <Select
+                  value={selectedMood}
+                  onValueChange={setSelectedMood}
+                  placeholder="Mood"
+                  className="bg-white/5 border-white/20 text-white"
+                >
+                  <option value="none">No Mood</option>
+                  <option value="chill">Chill</option>
+                  <option value="excited">Excited</option>
+                  <option value="romantic">Romantic</option>
+                  <option value="dark">Dark</option>
+                  <option value="inspirational">Inspirational</option>
+                  <option value="funny">Funny</option>
+                  <option value="nostalgic">Nostalgic</option>
+                  <option value="focus">Focus</option>
                 </Select>
               </div>
             </CardContent>
