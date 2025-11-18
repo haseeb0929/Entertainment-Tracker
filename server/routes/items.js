@@ -5,32 +5,107 @@ import Profile from "../models/Profile.js";
 import User from "../models/User.js";
 const router = express.Router();
 
-// 🔹 Country → Region mapper
+// 🔹 Country → Region label mapper (aligned with UI labels)
 const countryToRegion = (countryCode) => {
     if (!countryCode) return "Unknown";
     const regions = {
+        // Americas grouped as "Hollywood"
         US: "Hollywood",
         CA: "Hollywood",
         MX: "Hollywood",
-        GB: "European",
+        BR: "Hollywood",
+        AR: "Hollywood",
+        CL: "Hollywood",
+
+        // UK explicitly labeled as "British"
+        GB: "British",
+
+        // Europe
         FR: "European",
         DE: "European",
         IT: "European",
         ES: "European",
-        IN: "Asian",
-        PK: "Asian",
+        NL: "European",
+        SE: "European",
+        NO: "European",
+        DK: "European",
+        FI: "European",
+        PL: "European",
+
+        // South/West Asia (Bollywood for IN/PK)
+        IN: "Bollywood",
+        PK: "Bollywood",
+
+        // East Asia
+        KR: "Korean",
+        JP: "Japanese",
         CN: "Asian",
-        JP: "Asian",
-        BR: "Hollywood",
-        AR: "Hollywood",
-        CL: "Hollywood",
+        TW: "Asian",
+        HK: "Asian",
+        TH: "Asian",
+        ID: "Asian",
+        VN: "Asian",
+
+        // Africa & Oceania (not in UI options but kept for completeness)
         NG: "Africa",
         ZA: "Africa",
         EG: "Africa",
+        MA: "Africa",
         AU: "Oceania",
         NZ: "Oceania",
     };
     return regions[countryCode] || "Other";
+};
+
+// 🔹 Language → Representative country code (best-effort fallback for movies)
+const languageToCountry = (lang) => {
+    const map = {
+        en: "US",
+        hi: "IN",
+        ur: "PK",
+        ko: "KR",
+        ja: "JP",
+        zh: "CN",
+        yue: "HK",
+        fr: "FR",
+        de: "DE",
+        es: "ES",
+        it: "IT",
+        pt: "BR",
+        ru: "RU",
+        ar: "EG",
+        tr: "TR",
+        fa: "IR",
+        nl: "NL",
+        sv: "SE",
+        no: "NO",
+        da: "DK",
+        fi: "FI",
+        pl: "PL",
+    };
+    return map[String(lang || '').toLowerCase()] || null;
+};
+
+// 🔹 UI Region label → representative ISO country codes
+const regionLabelToCountryCodes = (label) => {
+    const key = String(label || '').toLowerCase();
+    const map = {
+        hollywood: ["US"],
+        bollywood: ["IN"],
+        british: ["GB"],
+        korean: ["KR"],
+        japanese: ["JP"],
+        european: ["FR","DE","IT","ES","NL","SE","NO","DK","FI","PL"],
+        asian: ["JP","KR","CN","IN","PK","TH","ID","VN"],
+    };
+    return map[key] || [];
+};
+
+// 🔹 Normalize UI genre names to TMDB genre names
+const normalizeGenreName = (name) => {
+    const n = String(name || '').toLowerCase();
+    if (n === 'sci-fi' || n === 'sci fi' || n === 'science-fiction') return 'Science Fiction';
+    return name;
 };
 
 // Simple in-memory cache with TTL
@@ -91,14 +166,23 @@ async function _moviesFromTMDB(search, genre, region) {
         params.set("sort_by", "popularity.desc");
     }
     if (genre && genre.toLowerCase() !== "all") {
-        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+        const wanted = normalizeGenreName(genre);
+        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
         if (entry) params.set("with_genres", String(entry[0]));
+    }
+    // When discovering (no search), push region down to TMDB if possible
+    if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
+        const codes = regionLabelToCountryCodes(region);
+        if (codes.length > 0) {
+            // OR semantics with '|'
+            params.set("with_origin_country", codes.join("|"));
+        }
     }
     const tmdbRes = await fetch(`${url}?${params.toString()}`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
     const tmdbData = await tmdbRes.json();
     const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
     let out = results.map((m) => {
-        const country = (m.origin_country && m.origin_country[0]) || "Unknown";
+        const country = (m.origin_country && m.origin_country[0]) || languageToCountry(m.original_language) || "Unknown";
         const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
         const backdrop = m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : poster;
         const gname = (m.genre_ids && m.genre_ids.length > 0) ? (genreMap.get(m.genre_ids[0]) || "Unknown") : "Unknown";
@@ -143,14 +227,19 @@ async function _seriesFromTMDB(search, genre, region) {
         params.set("sort_by", "popularity.desc");
     }
     if (genre && genre.toLowerCase() !== "all") {
-        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+        const wanted = normalizeGenreName(genre);
+        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
         if (entry) params.set("with_genres", String(entry[0]));
+    }
+    if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
+        const codes = regionLabelToCountryCodes(region);
+        if (codes.length > 0) params.set("with_origin_country", codes.join("|"));
     }
     const tmdbRes = await fetch(`${url}?${params.toString()}`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
     const tmdbData = await tmdbRes.json();
     const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
     let out = results.map((t) => {
-        const country = (t.origin_country && t.origin_country[0]) || "Unknown";
+        const country = (t.origin_country && t.origin_country[0]) || languageToCountry(t.original_language) || "Unknown";
         const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
         const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
         const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Unknown") : "Unknown";
@@ -207,32 +296,74 @@ async function _booksFromGoogle(search, genre, region) {
     return out;
 }
 
-async function _gamesFromRawg(search, genre) {
-    const apiKey = "decd56d444eb4de18699c2f950138a5b";
-    const key = `games:${search || ''}:${genre || 'all'}`;
-    const cached = getCache(key);
-    if (cached) return cached;
-    let url = `https://api.rawg.io/api/games?key=${apiKey}&page_size=40`;
-    if (search && search.trim() !== "" && search !== "react") url += `&search=${encodeURIComponent(search)}`;
-    if (genre && genre.toLowerCase() !== "all") url += `&genre=${encodeURIComponent(genre)}`;
-    const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 8000 });
-    let out = (data.results || []).map((item) => ({
-        id: item.id,
-        type: "games",
-        title: item.name || "Unknown Title",
-        rating: item.rating || 0,
-        genre: item.genres?.[0]?.name || "Unknown",
-        region: "Global",
-        country: "Unknown",
-        trending: false,
-        thumbnail: item.background_image || "",
-        description: item.description || "",
-        released: item.released || "",
-        platforms: item.platforms ? item.platforms.map((p) => p.platform.name) : [],
-        esrb: item.esrb_rating?.name || "Not Rated",
-    }));
-    if (genre && genre.toLowerCase() !== "all") out = out.filter((g) => (g.genre || '').toLowerCase() === genre.toLowerCase());
-    setCache(key, out);
+async function _animeFromTMDB(search, genre, region) {
+    const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
+    const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
+    // Get TV genres to map ids -> names
+    const genreResp = await fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${TMDB_KEY}&language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
+    const genreJson = await genreResp.json();
+    const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+
+    let url;
+    const params = new URLSearchParams();
+    const wantSearch = (search && search.trim() !== "" && search !== "react");
+    if (wantSearch) {
+        url = "https://api.themoviedb.org/3/search/tv";
+        params.set("query", search);
+        params.set("include_adult", "false");
+        params.set("language", "en-US");
+        params.set("page", "1");
+    } else {
+        url = "https://api.themoviedb.org/3/discover/tv";
+        params.set("language", "en-US");
+        params.set("page", "1");
+        params.set("sort_by", "popularity.desc");
+        // Force Animation genre (16)
+        params.set("with_genres", "16");
+        // Prefer Japanese origin when region is set
+        if (region && region.toLowerCase() !== "all") {
+            const codes = regionLabelToCountryCodes(region);
+            const arr = codes.length ? codes : ["JP"];
+            params.set("with_origin_country", arr.join("|"));
+        } else {
+            params.set("with_origin_country", "JP|KR|CN");
+        }
+    }
+    const tmdbRes = await fetch(`${url}?${params.toString()}`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
+    const tmdbData = await tmdbRes.json();
+    const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
+    let out = results
+        .filter(t => {
+            if (!wantSearch) return true; // discover already constrained
+            const hasAnim = Array.isArray(t.genre_ids) && t.genre_ids.includes(16);
+            const jpish = (t.origin_country && t.origin_country.includes("JP")) || (t.original_language === 'ja');
+            return hasAnim || jpish;
+        })
+        .map((t) => {
+            const country = (t.origin_country && t.origin_country[0]) || languageToCountry(t.original_language) || "Unknown";
+            const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
+            const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
+            const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Animation") : "Animation";
+            return {
+                id: t.id,
+                type: "anime",
+                title: t.name || t.original_name || "Unknown Title",
+                rating: typeof t.vote_average === "number" ? Number(t.vote_average.toFixed(1)) : 0,
+                genre: gname,
+                region: countryToRegion(country),
+                country,
+                trending: Boolean(t.popularity && t.popularity > 100),
+                thumbnail: poster || backdrop,
+                description: t.overview || "",
+                language: t.original_language || undefined,
+            };
+        });
+    if (region && region.toLowerCase() !== "all") {
+        out = out.filter((m) => (m.region || '').toLowerCase() === region.toLowerCase());
+    }
+    if (genre && genre.toLowerCase() !== 'all') {
+        out = out.filter((m) => String(m.genre || '').toLowerCase() === String(normalizeGenreName(genre)).toLowerCase());
+    }
     return out;
 }
 
@@ -358,8 +489,13 @@ router.get("/items", async (req, res) => {
             // Optional filters
             if (genre && genre.toLowerCase() !== "all") {
                 // find genre id by name (case-insensitive)
-                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+                const wanted = normalizeGenreName(genre);
+                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
                 if (entry) params.set("with_genres", String(entry[0]));
+            }
+            if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
+                const codes = regionLabelToCountryCodes(region);
+                if (codes.length > 0) params.set("with_origin_country", codes.join("|"));
             }
 
             const tmdbRes = await fetch(`${url}?${params.toString()}`, {
@@ -369,7 +505,7 @@ router.get("/items", async (req, res) => {
             const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
 
             let out = results.map((m) => {
-                const country = (m.origin_country && m.origin_country[0]) || "Unknown";
+                const country = (m.origin_country && m.origin_country[0]) || languageToCountry(m.original_language) || "Unknown";
                 const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
                 const backdrop = m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : poster;
                 const gname = (m.genre_ids && m.genre_ids.length > 0) ? (genreMap.get(m.genre_ids[0]) || "Unknown") : "Unknown";
@@ -423,8 +559,13 @@ router.get("/items", async (req, res) => {
             }
 
             if (genre && genre.toLowerCase() !== "all") {
-                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(genre).toLowerCase());
+                const wanted = normalizeGenreName(genre);
+                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
                 if (entry) params.set("with_genres", String(entry[0]));
+            }
+            if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
+                const codes = regionLabelToCountryCodes(region);
+                if (codes.length > 0) params.set("with_origin_country", codes.join("|"));
             }
 
             const tmdbRes = await fetch(`${url}?${params.toString()}`, {
@@ -434,7 +575,7 @@ router.get("/items", async (req, res) => {
             const results = Array.isArray(tmdbData.results) ? tmdbData.results : [];
 
             let out = results.map((t) => {
-                const country = (t.origin_country && t.origin_country[0]) || "Unknown";
+                const country = (t.origin_country && t.origin_country[0]) || languageToCountry(t.original_language) || "Unknown";
                 const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
                 const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
                 const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Unknown") : "Unknown";
@@ -466,7 +607,7 @@ router.get("/items", async (req, res) => {
                 _moviesFromTMDB(search, genre, region).catch(() => []),
                 _seriesFromTMDB(search, genre, region).catch(() => []),
                 _booksFromGoogle(search, genre, region).catch(() => []),
-                _gamesFromRawg(search, genre).catch(() => []),
+                _animeFromTMDB(search, genre, region).catch(() => []),
                 _musicFromSpotify(search).catch(() => []),
             ]);
             const combined = [...mv, ...tv, ...bk, ...gm, ...mu];
@@ -474,49 +615,11 @@ router.get("/items", async (req, res) => {
             return res.json(combined);
         }
 
-        // ========== GAMES ==========
-        if (type === "games") {
-            const apiKey = "decd56d444eb4de18699c2f950138a5b";
-            const key = `games:${search || ''}:${genre || 'all'}`;
-            const cached = getCache(key);
-            if (cached) { res.status(200); return res.json(cached); }
-            let url = `https://api.rawg.io/api/games?key=${apiKey}&page_size=40`;
-
-            if (search && search.trim() !== "" && search !== "react") {
-                url += `&search=${encodeURIComponent(search)}`;
-            }
-            if (genre && genre.toLowerCase() !== "all") {
-                url += `&genre=${encodeURIComponent(genre)}`;
-            }
-
-            const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 8000 });
-            let filteredGames = (data.results || []).map((item) => ({
-                id: item.id,
-                type: "games",
-                title: item.name || "Unknown Title",
-                rating: item.rating || 0,
-                genre: item.genres?.[0]?.name || "Unknown",
-                region: "Global", // RAWG does not provide region
-                country: "Unknown",
-                trending: false,
-                thumbnail: item.background_image || "",
-                description: item.description || "",
-                released: item.released || "",
-                platforms: item.platforms
-                    ? item.platforms.map((p) => p.platform.name)
-                    : [],
-                esrb: item.esrb_rating?.name || "Not Rated",
-            }));
-
-            if (genre && genre.toLowerCase() !== "all") {
-                filteredGames = filteredGames.filter(
-                    (g) => g.genre.toLowerCase() === genre.toLowerCase()
-                );
-            }
-
-            setCache(key, filteredGames);
-            res.status(200)
-            return res.json(filteredGames);
+        // ========== ANIME ==========
+        if (type === "anime") {
+            const out = await _animeFromTMDB(search, genre, region).catch(() => []);
+            res.status(200);
+            return res.json(out);
         }
 
         if (type === "music") {
@@ -662,7 +765,7 @@ router.get("/recommendations", async (req, res) => {
 
         const typeList = (types && types !== 'all')
             ? String(types).split(',').map(t => t.trim()).filter(Boolean)
-            : ["movies","series","books","games","music"];
+            : ["movies","series","books","anime","music"];
 
         // Map moods to genres/queries per type
         const moodMap = {
@@ -670,56 +773,56 @@ router.get("/recommendations", async (req, res) => {
                 movies: { genre: "Drama" },
                 series: { genre: "Drama" },
                 books: { search: "contemporary fiction" },
-                games: { genre: "Indie" },
+                anime: { genre: "Animation" },
                 music: { search: "lofi chill" },
             },
             excited: {
                 movies: { genre: "Action" },
                 series: { genre: "Action" },
                 books: { search: "action thriller" },
-                games: { genre: "Action" },
+                anime: { genre: "Animation" },
                 music: { search: "energetic workout" },
             },
             romantic: {
                 movies: { genre: "Romance" },
                 series: { genre: "Romance" },
                 books: { search: "romance novel" },
-                games: { genre: "Casual" },
+                anime: { genre: "Animation" },
                 music: { search: "romantic ballad" },
             },
             dark: {
                 movies: { genre: "Thriller" },
                 series: { genre: "Thriller" },
                 books: { search: "dark mystery" },
-                games: { genre: "Horror" },
+                anime: { genre: "Animation" },
                 music: { search: "dark ambient" },
             },
             inspirational: {
                 movies: { genre: "Documentary" },
                 series: { genre: "Documentary" },
                 books: { search: "self help motivational" },
-                games: { genre: "Adventure" },
+                anime: { genre: "Animation" },
                 music: { search: "uplifting instrumental" },
             },
             funny: {
                 movies: { genre: "Comedy" },
                 series: { genre: "Comedy" },
                 books: { search: "humor satire" },
-                games: { genre: "Casual" },
+                anime: { genre: "Animation" },
                 music: { search: "feel good pop" },
             },
             nostalgic: {
                 movies: { genre: "Family" },
                 series: { genre: "Family" },
                 books: { search: "classic literature" },
-                games: { genre: "Puzzle" },
+                anime: { genre: "Animation" },
                 music: { search: "80s hits" },
             },
             focus: {
                 movies: { genre: "Documentary" },
                 series: { genre: "Documentary" },
                 books: { search: "nonfiction science" },
-                games: { genre: "Strategy" },
+                anime: { genre: "Animation" },
                 music: { search: "lofi beats to study" },
             },
         };
@@ -749,7 +852,7 @@ router.get("/recommendations", async (req, res) => {
         if (typeList.includes('movies')) addTask(async () => _moviesFromTMDB('', profile.movies?.genre || 'all', 'all'));
         if (typeList.includes('series')) addTask(async () => _seriesFromTMDB('', profile.series?.genre || 'all', 'all'));
         if (typeList.includes('books')) addTask(async () => _booksFromGoogle(seed(profile.books?.search || mood), 'all', 'all'));
-        if (typeList.includes('games')) addTask(async () => _gamesFromRawg('', profile.games?.genre || 'all'));
+        if (typeList.includes('anime')) addTask(async () => _animeFromTMDB('', profile.anime?.genre || 'all', 'all'));
         if (typeList.includes('music')) addTask(async () => _musicFromSpotify(seed(profile.music?.search || mood)));
 
         const results = await Promise.all(tasks.map(t => t().catch(() => [])));

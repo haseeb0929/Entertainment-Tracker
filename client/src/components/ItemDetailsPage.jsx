@@ -5,7 +5,6 @@ import {
   Tv,
   Music,
   Book,
-  Gamepad2,
   Star,
   Heart,
   Play,
@@ -23,7 +22,7 @@ const entertainmentTypes = [
   { id: "series", name: "TV Series", icon: Tv, gradient: "from-indigo-600 via-blue-500 to-sky-400" },
   { id: "music", name: "Music", icon: Music, gradient: "from-green-500 via-emerald-400 to-teal-400" },
   { id: "books", name: "Books", icon: Book, gradient: "from-yellow-500 via-amber-400 to-orange-400" },
-  { id: "games", name: "Games", icon: Gamepad2, gradient: "from-purple-500 via-fuchsia-400 to-pink-400" },
+  { id: "anime", name: "Anime", icon: Tv, gradient: "from-purple-500 via-fuchsia-400 to-pink-400" },
 ];
 
 const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {

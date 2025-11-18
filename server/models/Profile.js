@@ -12,7 +12,7 @@ const ListItemSchema = new mongoose.Schema(
     // Added to identify what the item is
     type: {
       type: String,
-      enum: ["movies", "series", "music", "books", "games", "unknown"],
+      enum: ["movies", "series", "music", "books", "anime", "games", "unknown"],
       default: "unknown",
     },
     // Optional external API id to aid de-duplication
@@ -53,7 +53,7 @@ const StatsSchema = new mongoose.Schema(
       monthly: { type: Number, default: 0 },
       yearly: { type: Number, default: 0 },
     },
-    games: {
+    anime: {
       weekly: { type: Number, default: 0 },
       monthly: { type: Number, default: 0 },
       yearly: { type: Number, default: 0 },

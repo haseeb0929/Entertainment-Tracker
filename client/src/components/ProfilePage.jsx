@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import {
   Settings, Heart, Star, Clock, TrendingUp, Award,
-  Camera, Edit3, Save, X, Film, Music, Book, Gamepad2, Tv,
+  Camera, Edit3, Save, X, Film, Music, Book, Tv,
   MapPin, Calendar, Mail, Link2, Shield, ChevronDown, Plus, Minus, Search,
 } from "lucide-react"
 import { Navigation } from "../lib/Navigation"
@@ -67,7 +67,9 @@ export const TabsList = ({ children, activeTab, onTabChange }) => {
   const count = React.Children.count(children);
   const layoutClass = count === 2
     ? 'flex'
-    : 'grid grid-cols-4';
+    : count === 3
+      ? 'grid grid-cols-3'
+      : 'grid grid-cols-4';
   return (
     <div className={`${layoutClass} w-full bg-white/10 backdrop-blur-lg border border-white/20 rounded-lg p-1`}>
       {React.Children.map(children, (child) =>
@@ -84,7 +86,7 @@ export const TabsList = ({ children, activeTab, onTabChange }) => {
 export const TabsTrigger = ({ children, value, active, onClick, full }) => (
   <button
     onClick={onClick}
-    className={`${full ? 'flex-1 text-center' : ''} py-2 px-4 rounded-md text-sm font-medium transition-all ${active ? "bg-white/20 text-white" : "text-white/70 hover:text-white"}`}
+    className={`${full ? 'flex-1 text-center' : ''} py-2 px-4 rounded-md text-sm font-medium transition-all cursor-pointer ${active ? "bg-white/20 text-white" : "text-white/70 hover:text-white"}`}
   >
     {children}
   </button>
@@ -96,7 +98,7 @@ export const TabsContent = ({ children, value, activeTab }) =>
 export const Switch = ({ checked, onCheckedChange }) => (
   <button
     onClick={() => onCheckedChange(!checked)}
-    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? "bg-purple-500" : "bg-gray-600"
+    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${checked ? "bg-purple-500" : "bg-gray-600"
       }`}
   >
     <span
@@ -112,7 +114,7 @@ function getIconForType(type) {
     case "TV Series": return Tv;
     case "Music": return Music;
     case "Books": return Book;
-    case "Games": return Gamepad2;
+    case "Anime": return Tv;
     default: return Film;
   }
 }
@@ -123,7 +125,7 @@ function getColorForType(type) {
     case "TV Series": return "from-blue-500 to-purple-500";
     case "Music": return "from-green-500 to-teal-500";
     case "Books": return "from-yellow-500 to-orange-500";
-    case "Games": return "from-purple-500 to-indigo-500";
+    case "Anime": return "from-fuchsia-500 to-pink-500";
     default: return "from-gray-500 to-gray-700";
   }
 }
@@ -638,13 +640,13 @@ const ProfilePage = ({ navigateToPage }) => {
                     { key: 'on_hold', title: 'On Hold' },
                   ];
 
-                  const iconMap = { movies: Film, series: Tv, music: Music, books: Book, games: Gamepad2 };
+                  const iconMap = { movies: Film, series: Tv, music: Music, books: Book, anime: Tv };
                   const badgeColor = (t) =>
                     t === 'movies' ? 'from-red-500 to-pink-500' :
                     t === 'series' ? 'from-blue-500 to-purple-500' :
                     t === 'music' ? 'from-green-500 to-teal-500' :
                     t === 'books' ? 'from-yellow-500 to-orange-500' :
-                    t === 'games' ? 'from-purple-500 to-indigo-500' :
+                    t === 'anime' ? 'from-fuchsia-500 to-pink-500' :
                     'from-gray-500 to-gray-700';
 
                   const StatusSelect = ({ value, onChange, onOpenChange }) => {
@@ -975,7 +977,7 @@ const ProfilePage = ({ navigateToPage }) => {
                         { key: 'series', label: 'TV Series' },
                         { key: 'music', label: 'Music' },
                         { key: 'books', label: 'Books' },
-                        { key: 'games', label: 'Games' },
+                        { key: 'anime', label: 'Anime' },
                       ];
                       return sections.map((sec) => (
                         <div key={sec.key}>
@@ -1033,9 +1035,7 @@ const ProfilePage = ({ navigateToPage }) => {
                     <div className="text-gray-300 mt-1">{profileData?.username ? `@${profileData.username}` : <span className="text-white/60">Set a username from Edit Profile</span>}</div>
                   )}
                 </div>
-                {!isEditing && (
-                  <div className="text-xs text-gray-400">To change your username, click Edit Profile above and save.</div>
-                )}
+                {/* Removed instruction line per request */}
               </CardContent>
             </Card>
 

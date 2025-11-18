@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef } from "react"  // ✅ Added useRef
 import {
   Search, Filter, Star, TrendingUp, Heart, Play, Book,
-  Music, Gamepad2, Tv, Film, Home, User, LogIn,
-  Info, AlertCircle,  // ✅ Added AlertCircle for error icon
+  Music, Tv, Film, Home, User, LogIn,
+  Info, AlertCircle,
 } from "lucide-react"
 import { Navigation } from "../lib/Navigation"
 import { Card } from "../lib/Card"
 import { CardContent } from "../lib/CardContent"
 import { Input } from "../lib/Input"
 import { Button } from "../lib/Button"
-import { Select } from "../lib/Select"
+import { MenuSelect } from "../lib/MenuSelect"
 import { Badge } from "../lib/Badge"
 import { useAuth } from "../utils/AuthContext"
 
@@ -18,7 +18,7 @@ const entertainmentTypes = [
   { id: "series", name: "TV Series", icon: Tv, color: "from-blue-500 to-purple-500" },
   { id: "music", name: "Music", icon: Music, color: "from-green-500 to-teal-500" },
   { id: "books", name: "Books", icon: Book, color: "from-yellow-500 to-orange-500" },
-  { id: "games", name: "Games", icon: Gamepad2, color: "from-purple-500 to-indigo-500" },
+  { id: "anime", name: "Anime", icon: Tv, color: "from-fuchsia-500 to-pink-500" },
 ]
 
 const genres = ["Action", "Comedy", "Drama", "Horror", "Romance", "Sci-Fi", "Thriller", "Documentary"]
@@ -243,13 +243,13 @@ const HomePage = ({ navigateToPage = () => { } }) => {
 
         {/* Search and Filter Section */}
         <div className="max-w-4xl mx-auto mb-12">
-          <Card>
+          <Card className="relative z-[100]">
             <CardContent>
               <div className="flex flex-col md:flex-row gap-4 mb-6">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                   <Input
-                    placeholder="Search movies, series, music, books, games..."
+                    placeholder="Search movies, series, music, books, anime..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     icon={<Search className="w-5 h-5" />}
@@ -262,64 +262,52 @@ const HomePage = ({ navigateToPage = () => { } }) => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Select
+                <MenuSelect
                   value={selectedType}
                   onValueChange={setSelectedType}
                   placeholder="Type"
-                  className="bg-white/5 border-white/20 text-white"
-                >
-                  <option value="all">All Types</option>
-                  {entertainmentTypes.map((type) => (
-                    <option key={type.id} value={type.id} className="bg-slate-800">
-                      {type.name}
-                    </option>
-                  ))}
-                </Select>
+                  options={[
+                    { value: 'all', label: 'All Types' },
+                    ...entertainmentTypes.map(t => ({ value: t.id, label: t.name }))
+                  ]}
+                />
 
-                <Select
+                <MenuSelect
                   value={selectedGenre}
                   onValueChange={setSelectedGenre}
                   placeholder="Genre"
-                  className="bg-white/5 border-white/20 text-white"
-                >
-                  <option value="all">All Genres</option>
-                  {genres.map((genre) => (
-                    <option key={genre} value={genre} className="bg-slate-800">
-                      {genre}
-                    </option>
-                  ))}
-                </Select>
+                  options={[
+                    { value: 'all', label: 'All Genres' },
+                    ...genres.map(g => ({ value: g, label: g }))
+                  ]}
+                />
 
-                <Select
+                <MenuSelect
                   value={selectedRegion}
                   onValueChange={setSelectedRegion}
                   placeholder="Region"
-                  className="bg-white/5 border-white/20 text-white"
-                >
-                  <option value="all">All Regions</option>
-                  {regions.map((region) => (
-                    <option key={region} value={region} className="bg-slate-800">
-                      {region}
-                    </option>
-                  ))}
-                </Select>
+                  options={[
+                    { value: 'all', label: 'All Regions' },
+                    ...regions.map(r => ({ value: r, label: r }))
+                  ]}
+                />
 
-                <Select
+                <MenuSelect
                   value={selectedMood}
                   onValueChange={setSelectedMood}
                   placeholder="Mood"
-                  className="bg-white/5 border-white/20 text-white"
-                >
-                  <option value="none">No Mood</option>
-                  <option value="chill">Chill</option>
-                  <option value="excited">Excited</option>
-                  <option value="romantic">Romantic</option>
-                  <option value="dark">Dark</option>
-                  <option value="inspirational">Inspirational</option>
-                  <option value="funny">Funny</option>
-                  <option value="nostalgic">Nostalgic</option>
-                  <option value="focus">Focus</option>
-                </Select>
+                  options={[
+                    { value: 'none', label: 'No Mood' },
+                    { value: 'chill', label: 'Chill' },
+                    { value: 'excited', label: 'Excited' },
+                    { value: 'romantic', label: 'Romantic' },
+                    { value: 'dark', label: 'Dark' },
+                    { value: 'inspirational', label: 'Inspirational' },
+                    { value: 'funny', label: 'Funny' },
+                    { value: 'nostalgic', label: 'Nostalgic' },
+                    { value: 'focus', label: 'Focus' },
+                  ]}
+                />
               </div>
             </CardContent>
           </Card>

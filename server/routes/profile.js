@@ -601,7 +601,7 @@ router.get("/:userId/stats", requireAuth, ensureSelf, async (req, res) => {
       return d >= since && d <= now;
     });
 
-    const types = ["movies", "series", "music", "books", "games", "unknown"]; 
+    const types = ["movies", "series", "music", "books", "anime", "unknown"]; 
     const initCounts = () => types.reduce((acc, t) => (acc[t] = 0, acc), {});
     const completed = initCounts();
     const rewatch = initCounts();
