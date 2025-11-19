@@ -23,6 +23,63 @@ const entertainmentTypes = [
 
 const genres = ["Action", "Comedy", "Drama", "Horror", "Romance", "Sci-Fi", "Thriller", "Documentary"]
 const regions = ["Hollywood", "Bollywood", "Korean", "Japanese", "British", "European", "Asian"]
+// Static book categories provided
+const BOOK_CATEGORIES = [
+  "Agricultural experiment stations",
+  "Agriculture",
+  "American fiction",
+  "American literature",
+  "Art",
+  "Authors, American",
+  "Bakers",
+  "Bibles",
+  "Biography & Autobiography",
+  "Books",
+  "Booksellers' catalogs",
+  "Business",
+  "Business & Economics",
+  "Chemistry",
+  "Chemistry, Technical",
+  "Children",
+  "Christianity",
+  "Civil engineering",
+  "Computers",
+  "Diagnosis",
+  "Disasters",
+  "Education",
+  "Educational technology",
+  "Electrical engineering",
+  "English fiction",
+  "Fiction",
+  "French drama",
+  "German fiction",
+  "High schools",
+  "History",
+  "Horror fiction",
+  "Horror films",
+  "Humor",
+  "Iowa",
+  "Italy",
+  "Juvenile Fiction",
+  "Juvenile Nonfiction",
+  "Language Arts & Disciplines",
+  "Libraries",
+  "Literary Criticism",
+  "Murder",
+  "Performing Arts",
+  "Philosophy",
+  "Physical education and training",
+  "Psychology",
+  "Reference",
+  "Romances, English",
+  "Science",
+  "Social Science",
+  "Subject headings, Library of Congress",
+  "Technology",
+  "Technology & Engineering",
+  "Travel",
+  "Universities and colleges"
+];
 
 const HomePage = ({ navigateToPage = () => { } }) => {
   const { auth } = useAuth();
@@ -35,6 +92,7 @@ const HomePage = ({ navigateToPage = () => { } }) => {
   const [selectedGenre, setSelectedGenre] = useState("all")
   const [selectedRegion, setSelectedRegion] = useState("all")
   const [selectedMood, setSelectedMood] = useState("none")
+  const [selectedBookCategory, setSelectedBookCategory] = useState("all")
 
   const [items, setItems] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -52,12 +110,28 @@ const HomePage = ({ navigateToPage = () => { } }) => {
     return () => clearTimeout(handler)
   }, [searchQuery])
 
-  const query = new URLSearchParams({
+  const queryObj = {
     search: debouncedSearch || "",
     type: selectedType || "all",
-    genre: selectedGenre || "all",
     region: selectedRegion || "all",
-  }).toString()
+  };
+  if (selectedType === 'books') {
+    if (selectedBookCategory && selectedBookCategory !== 'all') {
+      queryObj.categories = selectedBookCategory;
+    }
+  } else {
+    queryObj.genre = selectedGenre || 'all';
+  }
+  const query = new URLSearchParams(queryObj).toString()
+
+  // Reset incompatible filters on type change
+  useEffect(() => {
+    if (selectedType === 'books') {
+      if (selectedGenre !== 'all') setSelectedGenre('all');
+    } else {
+      if (selectedBookCategory !== 'all') setSelectedBookCategory('all');
+    }
+  }, [selectedType])
 
   useEffect(() => {
     let mounted = true;
@@ -272,15 +346,24 @@ const HomePage = ({ navigateToPage = () => { } }) => {
                   ]}
                 />
 
-                <MenuSelect
-                  value={selectedGenre}
-                  onValueChange={setSelectedGenre}
-                  placeholder="Genre"
-                  options={[
-                    { value: 'all', label: 'All Genres' },
-                    ...genres.map(g => ({ value: g, label: g }))
-                  ]}
-                />
+                {selectedType === 'books' ? (
+                  <MenuSelect
+                    value={selectedBookCategory}
+                    onValueChange={setSelectedBookCategory}
+                    placeholder="Book Category"
+                    options={[{ value: 'all', label: 'All Categories' }, ...BOOK_CATEGORIES.map(c => ({ value: c, label: c }))]}
+                  />
+                ) : (
+                  <MenuSelect
+                    value={selectedGenre}
+                    onValueChange={setSelectedGenre}
+                    placeholder="Genre"
+                    options={[
+                      { value: 'all', label: 'All Genres' },
+                      ...genres.map(g => ({ value: g, label: g }))
+                    ]}
+                  />
+                )}
 
                 <MenuSelect
                   value={selectedRegion}
@@ -417,7 +500,13 @@ const HomePage = ({ navigateToPage = () => { } }) => {
                       <div className="flex items-center gap-2 mb-3">
                         <Star className="w-4 h-4 text-yellow-400 fill-current" />
                         <span className="text-white font-semibold">{(item.rating ? item.rating : item.popularity) || 0}</span>
-                        <span className="text-gray-300">({item.genre})</span>
+                        <span className="text-gray-300">(
+                          {Array.isArray(item.genres) && item.genres.length > 0
+                            ? item.genres.join(', ')
+                            : Array.isArray(item.categories) && item.categories.length > 0
+                              ? item.categories.join(', ')
+                              : item.genre}
+                        )</span>
                       </div>
                     </div>
 

@@ -180,11 +180,30 @@ const ItemDetailsPage = ({ item, navigateToPage = () => {} }) => {
             <div className="text-gray-300 leading-relaxed text-base lg:text-lg space-y-4">
               <p>{details.description || "No description available."}</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {details.genre && (
-                  <div>
-                    <span className="font-medium text-white">Genre: </span>
-                    {details.genre}
-                  </div>
+                {details.type === 'books' ? (
+                  (details.categories && details.categories.length > 0) ? (
+                    <div>
+                      <span className="font-medium text-white">Categories: </span>
+                      {details.categories.join(', ')}
+                    </div>
+                  ) : (details.genre && (
+                    <div>
+                      <span className="font-medium text-white">Category: </span>
+                      {details.genre}
+                    </div>
+                  ))
+                ) : (
+                  (details.genres && details.genres.length > 0) ? (
+                    <div>
+                      <span className="font-medium text-white">Genres: </span>
+                      {details.genres.join(', ')}
+                    </div>
+                  ) : (details.genre && (
+                    <div>
+                      <span className="font-medium text-white">Genre: </span>
+                      {details.genre}
+                    </div>
+                  ))
                 )}
                 {details.region && (
                   <div>

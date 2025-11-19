@@ -101,11 +101,50 @@ const regionLabelToCountryCodes = (label) => {
     return map[key] || [];
 };
 
-// 🔹 Normalize UI genre names to TMDB genre names
-const normalizeGenreName = (name) => {
+// 🔹 Hard-coded TMDB genres (as provided) used everywhere
+const HARDCODED_GENRES = [
+    { id: 28, name: "Action" },
+    { id: 12, name: "Adventure" },
+    { id: 16, name: "Animation" },
+    { id: 35, name: "Comedy" },
+    { id: 80, name: "Crime" },
+    { id: 99, name: "Documentary" },
+    { id: 18, name: "Drama" },
+    { id: 10751, name: "Family" },
+    { id: 14, name: "Fantasy" },
+    { id: 36, name: "History" },
+    { id: 27, name: "Horror" },
+    { id: 10402, name: "Music" },
+    { id: 9648, name: "Mystery" },
+    { id: 10749, name: "Romance" },
+    { id: 878, name: "Science Fiction" },
+    { id: 10770, name: "TV Movie" },
+    { id: 53, name: "Thriller" },
+    { id: 10752, name: "War" },
+    { id: 37, name: "Western" },
+];
+
+// 🔹 Normalize UI genre labels to TMDB genre names per media type
+const mapUiGenreName = (mediaType, name) => {
     const n = String(name || '').toLowerCase();
-    if (n === 'sci-fi' || n === 'sci fi' || n === 'science-fiction') return 'Science Fiction';
+    // Common canonicalizations
+    const sci = (n === 'sci-fi' || n === 'sci fi' || n === 'science-fiction' || n === 'science fiction');
+    if (mediaType === 'movie') {
+        if (sci) return 'Science Fiction';
+    }
+    if (mediaType === 'tv') {
+        // TMDB TV uses "Sci-Fi & Fantasy"
+        if (sci) return 'Sci-Fi & Fantasy';
+    }
     return name;
+};
+
+// 🔹 Resolve UI genre to TMDB genre id using a genre map (id->name)
+const mapUiGenreToId = (mediaType, uiGenre, genreMap) => {
+    if (!uiGenre || String(uiGenre).toLowerCase() === 'all') return null;
+    const wantedName = mapUiGenreName(mediaType, uiGenre);
+    const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wantedName).toLowerCase());
+    return entry ? String(entry[0]) : null;
 };
 
 // Simple in-memory cache with TTL
@@ -148,9 +187,7 @@ async function fetchJsonWithRetry(url, options = {}, { retries = 1, timeoutMs = 
 async function _moviesFromTMDB(search, genre, region) {
     const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
     const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
-    const genreResp = await fetch(`https://api.themoviedb.org/3/genre/movie/list?api_key=${TMDB_KEY}&language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
-    const genreJson = await genreResp.json();
-    const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+    const genreMap = new Map(HARDCODED_GENRES.map(g => [g.id, g.name]));
     let url;
     const params = new URLSearchParams();
     if (search && search.trim() !== "" && search !== "react") {
@@ -166,9 +203,8 @@ async function _moviesFromTMDB(search, genre, region) {
         params.set("sort_by", "popularity.desc");
     }
     if (genre && genre.toLowerCase() !== "all") {
-        const wanted = normalizeGenreName(genre);
-        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
-        if (entry) params.set("with_genres", String(entry[0]));
+        const gid = mapUiGenreToId('movie', genre, genreMap);
+        if (gid) params.set("with_genres", gid);
     }
     // When discovering (no search), push region down to TMDB if possible
     if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
@@ -185,13 +221,15 @@ async function _moviesFromTMDB(search, genre, region) {
         const country = (m.origin_country && m.origin_country[0]) || languageToCountry(m.original_language) || "Unknown";
         const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
         const backdrop = m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : poster;
-        const gname = (m.genre_ids && m.genre_ids.length > 0) ? (genreMap.get(m.genre_ids[0]) || "Unknown") : "Unknown";
+        const gnames = Array.isArray(m.genre_ids) && m.genre_ids.length > 0 ? m.genre_ids.map(id => genreMap.get(id)).filter(Boolean) : [];
+        const gname = gnames[0] || "Unknown";
         return {
             id: m.id,
             type: "movies",
             title: m.title || m.original_title || "Unknown Title",
             rating: typeof m.vote_average === "number" ? Number(m.vote_average.toFixed(1)) : 0,
             genre: gname,
+            genres: gnames,
             region: countryToRegion(country),
             country,
             trending: Boolean(m.popularity && m.popularity > 100),
@@ -208,10 +246,8 @@ async function _moviesFromTMDB(search, genre, region) {
 
 async function _seriesFromTMDB(search, genre, region) {
     const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
-    const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
-    const genreResp = await fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${TMDB_KEY}&language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
-    const genreJson = await genreResp.json();
-    const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+    const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJza9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
+    const genreMap = new Map(HARDCODED_GENRES.map(g => [g.id, g.name]));
     let url;
     const params = new URLSearchParams();
     if (search && search.trim() !== "" && search !== "react") {
@@ -227,9 +263,8 @@ async function _seriesFromTMDB(search, genre, region) {
         params.set("sort_by", "popularity.desc");
     }
     if (genre && genre.toLowerCase() !== "all") {
-        const wanted = normalizeGenreName(genre);
-        const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
-        if (entry) params.set("with_genres", String(entry[0]));
+        const gid = mapUiGenreToId('tv', genre, genreMap);
+        if (gid) params.set("with_genres", gid);
     }
     if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
         const codes = regionLabelToCountryCodes(region);
@@ -242,13 +277,15 @@ async function _seriesFromTMDB(search, genre, region) {
         const country = (t.origin_country && t.origin_country[0]) || languageToCountry(t.original_language) || "Unknown";
         const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
         const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
-        const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Unknown") : "Unknown";
+        const gnames = Array.isArray(t.genre_ids) && t.genre_ids.length > 0 ? t.genre_ids.map(id => genreMap.get(id)).filter(Boolean) : [];
+        const gname = gnames[0] || "Unknown";
         return {
             id: t.id,
             type: "series",
             title: t.name || t.original_name || "Unknown Title",
             rating: typeof t.vote_average === "number" ? Number(t.vote_average.toFixed(1)) : 0,
             genre: gname,
+            genres: gnames,
             region: countryToRegion(country),
             country,
             trending: Boolean(t.popularity && t.popularity > 100),
@@ -299,11 +336,8 @@ async function _booksFromGoogle(search, genre, region) {
 async function _animeFromTMDB(search, genre, region) {
     const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
     const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
-    // Get TV genres to map ids -> names
-    const genreResp = await fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${TMDB_KEY}&language=en-US`, { headers: { Authorization: `Bearer ${TMDB_TOKEN}` } });
-    const genreJson = await genreResp.json();
-    const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
-
+        // Use hard-coded genres for mapping
+        const genreMap = new Map(HARDCODED_GENRES.map(g => [g.id, g.name]));
     let url;
     const params = new URLSearchParams();
     const wantSearch = (search && search.trim() !== "" && search !== "react");
@@ -318,8 +352,14 @@ async function _animeFromTMDB(search, genre, region) {
         params.set("language", "en-US");
         params.set("page", "1");
         params.set("sort_by", "popularity.desc");
-        // Force Animation genre (16)
-        params.set("with_genres", "16");
+        // Always include Animation (16) for anime; optionally AND with selected genre
+        const baseAnim = "16";
+        let withGenres = baseAnim;
+        if (genre && String(genre).toLowerCase() !== 'all' && String(genre).toLowerCase() !== 'animation') {
+            const gid = mapUiGenreToId('tv', genre, genreMap);
+            if (gid) withGenres = `${baseAnim},${gid}`; // AND semantics
+        }
+        params.set("with_genres", withGenres);
         // Prefer Japanese origin when region is set
         if (region && region.toLowerCase() !== "all") {
             const codes = regionLabelToCountryCodes(region);
@@ -343,13 +383,15 @@ async function _animeFromTMDB(search, genre, region) {
             const country = (t.origin_country && t.origin_country[0]) || languageToCountry(t.original_language) || "Unknown";
             const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
             const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
-            const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Animation") : "Animation";
+            const gnames = Array.isArray(t.genre_ids) && t.genre_ids.length > 0 ? t.genre_ids.map(id => genreMap.get(id)).filter(Boolean) : [];
+            const gname = gnames[0] || "Animation";
             return {
                 id: t.id,
                 type: "anime",
                 title: t.name || t.original_name || "Unknown Title",
                 rating: typeof t.vote_average === "number" ? Number(t.vote_average.toFixed(1)) : 0,
                 genre: gname,
+                genres: gnames,
                 region: countryToRegion(country),
                 country,
                 trending: Boolean(t.popularity && t.popularity > 100),
@@ -361,9 +403,7 @@ async function _animeFromTMDB(search, genre, region) {
     if (region && region.toLowerCase() !== "all") {
         out = out.filter((m) => (m.region || '').toLowerCase() === region.toLowerCase());
     }
-    if (genre && genre.toLowerCase() !== 'all') {
-        out = out.filter((m) => String(m.genre || '').toLowerCase() === String(normalizeGenreName(genre)).toLowerCase());
-    }
+    // Do not post-filter by first-genre name; TMDB filtering already applied
     return out;
 }
 
@@ -409,7 +449,7 @@ async function _musicFromSpotify(search) {
 }
 
 router.get("/items", async (req, res) => {
-    let { search, type, genre, region } = req.query;
+    let { search, type, genre, region, categories } = req.query;
     if (!search || search.trim() === "") {
         search = "react"; // default fallback
     }
@@ -417,23 +457,64 @@ router.get("/items", async (req, res) => {
     try {
         // ========== BOOKS ==========
         if (type === "books") {
-            const key = `books:${search || ''}:${genre || 'all'}:${region || 'all'}`;
+            // categories may be a comma-separated list; fallback to genre for backward compatibility
+            const categoryList = (categories || '').trim().length > 0
+                ? categories.split(',').map(c => c.trim()).filter(Boolean)
+                : ((genre && genre.toLowerCase() !== 'all') ? [genre] : []);
+
+            // Desired limit (Google Books max per request is 40). We'll batch if >40.
+            const desiredLimit = Math.max(1, Math.min(80, parseInt(req.query.limit, 10) || 70));
+
+            // Cache key includes selected categories, region & limit
+            const key = `books:${search || ''}:${categoryList.sort().join('|') || 'all'}:${region || 'all'}:lim${desiredLimit}`;
             const cached = getCache(key);
             if (cached) { res.status(200); return res.json(cached); }
 
-            // Limit fields to reduce payload size
-            const fields = encodeURIComponent("items(id,volumeInfo/title,volumeInfo/averageRating,volumeInfo/categories,volumeInfo/imageLinks/thumbnail,volumeInfo/authors,volumeInfo/description),items/saleInfo/country");
-            const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(search)}&maxResults=32&fields=${fields}`;
-            const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 7000 });
+            // Build query: if exactly one selected category, leverage subject: to narrow upstream results
+            let baseQuery = (search && search !== 'react') ? search : 'react';
+            if (categoryList.length === 1) {
+                // Append subject qualifier; Google Books API treats subject: as category filter
+                baseQuery += `+subject:${categoryList[0]}`;
+            }
 
-            let filteredBooks = (data.items || []).map((item) => {
+            const fields = encodeURIComponent("items(id,volumeInfo/title,volumeInfo/averageRating,volumeInfo/categories,volumeInfo/imageLinks/thumbnail,volumeInfo/authors,volumeInfo/description),items/saleInfo/country");
+
+            // Batch fetch if limit > 40
+            let allItems = [];
+            let startIndex = 0;
+            while (allItems.length < desiredLimit && startIndex < 200) { // cap pagination to avoid huge loops
+                const remaining = desiredLimit - allItems.length;
+                const batchSize = Math.min(40, remaining);
+                const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(baseQuery)}&maxResults=${batchSize}&startIndex=${startIndex}&fields=${fields}`;
+                try {
+                    const data = await fetchJsonWithRetry(url, {}, { retries: 1, timeoutMs: 7000 });
+                    const itemsArr = Array.isArray(data.items) ? data.items : [];
+                    if (itemsArr.length === 0) break; // no more results
+                    // Deduplicate by id
+                    for (const it of itemsArr) {
+                        if (!allItems.find(x => x.id === it.id)) allItems.push(it);
+                        if (allItems.length >= desiredLimit) break;
+                    }
+                } catch (e) {
+                    // Break on persistent error to return what we have
+                    break;
+                }
+                startIndex += batchSize;
+            }
+
+            let filteredBooks = (allItems || []).map((item) => {
                 const country = item.saleInfo?.country || "Unknown";
+                const rawCats = Array.isArray(item.volumeInfo.categories) ? item.volumeInfo.categories : [];
+                // Normalize categories: split any combined categories on '/' and trim
+                const expanded = rawCats.flatMap(c => String(c).split('/')).map(s => s.trim()).filter(Boolean);
+                const cats = expanded.slice(0, 12); // keep a reasonable number
                 return {
                     id: item.id,
                     type: "books",
                     title: item.volumeInfo.title || "Unknown Title",
                     rating: item.volumeInfo.averageRating || 0,
-                    genre: item.volumeInfo.categories?.[0] || "Unknown",
+                    genre: cats[0] || "Unknown", // backward compatibility
+                    categories: cats,
                     region: countryToRegion(country),
                     country,
                     trending: false,
@@ -443,16 +524,19 @@ router.get("/items", async (req, res) => {
                 };
             });
 
-            if (genre && genre.toLowerCase() !== "all") {
-                filteredBooks = filteredBooks.filter(
-                    (b) => b.genre.toLowerCase() === genre.toLowerCase()
-                );
+            if (categoryList.length > 0) {
+                // Match if any selected category appears as a whole or substring (case-insensitive)
+                const lcSelections = categoryList.map(c => c.toLowerCase());
+                filteredBooks = filteredBooks.filter(b => (b.categories || []).some(cat => {
+                    const lcCat = String(cat).toLowerCase();
+                    return lcSelections.some(sel => lcCat === sel || lcCat.includes(sel));
+                }));
             }
+
             if (region && region.toLowerCase() !== "all") {
-                filteredBooks = filteredBooks.filter(
-                    (b) => b.region.toLowerCase() === region.toLowerCase()
-                );
+                filteredBooks = filteredBooks.filter(b => b.region.toLowerCase() === region.toLowerCase());
             }
+
             setCache(key, filteredBooks);
             res.status(200);
             return res.json(filteredBooks);
@@ -463,12 +547,8 @@ router.get("/items", async (req, res) => {
             const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
             const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
 
-            // Fetch genre list map for movies
-            const genreResp = await fetch(`https://api.themoviedb.org/3/genre/movie/list?api_key=${TMDB_KEY}&language=en-US`, {
-                headers: { Authorization: `Bearer ${TMDB_TOKEN}` }
-            });
-            const genreJson = await genreResp.json();
-            const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+            // Use hard-coded genre list for movies
+            const genreMap = new Map(HARDCODED_GENRES.map(g => [g.id, g.name]));
 
             let url;
             const params = new URLSearchParams();
@@ -488,10 +568,8 @@ router.get("/items", async (req, res) => {
 
             // Optional filters
             if (genre && genre.toLowerCase() !== "all") {
-                // find genre id by name (case-insensitive)
-                const wanted = normalizeGenreName(genre);
-                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
-                if (entry) params.set("with_genres", String(entry[0]));
+                const gid = mapUiGenreToId('movie', genre, genreMap);
+                if (gid) params.set("with_genres", gid);
             }
             if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
                 const codes = regionLabelToCountryCodes(region);
@@ -508,13 +586,15 @@ router.get("/items", async (req, res) => {
                 const country = (m.origin_country && m.origin_country[0]) || languageToCountry(m.original_language) || "Unknown";
                 const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
                 const backdrop = m.backdrop_path ? `https://image.tmdb.org/t/p/w780${m.backdrop_path}` : poster;
-                const gname = (m.genre_ids && m.genre_ids.length > 0) ? (genreMap.get(m.genre_ids[0]) || "Unknown") : "Unknown";
+                const gnames = Array.isArray(m.genre_ids) && m.genre_ids.length > 0 ? m.genre_ids.map(id => genreMap.get(id)).filter(Boolean) : [];
+                const gname = gnames[0] || "Unknown";
                 return {
                     id: m.id,
                     type: "movies",
                     title: m.title || m.original_title || "Unknown Title",
                     rating: typeof m.vote_average === "number" ? Number(m.vote_average.toFixed(1)) : 0,
                     genre: gname,
+                    genres: gnames,
                     region: countryToRegion(country),
                     country,
                     trending: Boolean(m.popularity && m.popularity > 100),
@@ -536,12 +616,8 @@ router.get("/items", async (req, res) => {
             const TMDB_KEY = process.env.TMDB_API_KEY || "d3d929a444c71be2e820a0403ada5a84";
             const TMDB_TOKEN = process.env.TMDB_READ_TOKEN || "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkM2Q5MjlhNDQ0YzcxYmUyZTgyMGEwNDAzYWRhNWE4NCIsIm5iZiI6MTc2MzM5NTI2Mi43MDQsInN1YiI6IjY5MWI0NmJlNDEwZjUzNTQwY2M3Y2ZiOSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.E54bicFBrnHFaRmR3W1HvR7S66cik3ShXoAYBewQOSY";
 
-            // Fetch genre list map for TV
-            const genreResp = await fetch(`https://api.themoviedb.org/3/genre/tv/list?api_key=${TMDB_KEY}&language=en-US`, {
-                headers: { Authorization: `Bearer ${TMDB_TOKEN}` }
-            });
-            const genreJson = await genreResp.json();
-            const genreMap = new Map((genreJson.genres || []).map(g => [g.id, g.name]));
+            // Use hard-coded genre list for series
+            const genreMap = new Map(HARDCODED_GENRES.map(g => [g.id, g.name]));
 
             let url;
             const params = new URLSearchParams();
@@ -559,9 +635,8 @@ router.get("/items", async (req, res) => {
             }
 
             if (genre && genre.toLowerCase() !== "all") {
-                const wanted = normalizeGenreName(genre);
-                const entry = Array.from(genreMap.entries()).find(([, name]) => String(name).toLowerCase() === String(wanted).toLowerCase());
-                if (entry) params.set("with_genres", String(entry[0]));
+                const gid = mapUiGenreToId('tv', genre, genreMap);
+                if (gid) params.set("with_genres", gid);
             }
             if ((!search || search === "react") && region && region.toLowerCase() !== "all") {
                 const codes = regionLabelToCountryCodes(region);
@@ -578,13 +653,15 @@ router.get("/items", async (req, res) => {
                 const country = (t.origin_country && t.origin_country[0]) || languageToCountry(t.original_language) || "Unknown";
                 const poster = t.poster_path ? `https://image.tmdb.org/t/p/w500${t.poster_path}` : "";
                 const backdrop = t.backdrop_path ? `https://image.tmdb.org/t/p/w780${t.backdrop_path}` : poster;
-                const gname = (t.genre_ids && t.genre_ids.length > 0) ? (genreMap.get(t.genre_ids[0]) || "Unknown") : "Unknown";
+                const gnames = Array.isArray(t.genre_ids) && t.genre_ids.length > 0 ? t.genre_ids.map(id => genreMap.get(id)).filter(Boolean) : [];
+                const gname = gnames[0] || "Unknown";
                 return {
                     id: t.id,
                     type: "series",
                     title: t.name || t.original_name || "Unknown Title",
                     rating: typeof t.vote_average === "number" ? Number(t.vote_average.toFixed(1)) : 0,
                     genre: gname,
+                    genres: gnames,
                     region: countryToRegion(country),
                     country,
                     trending: Boolean(t.popularity && t.popularity > 100),
