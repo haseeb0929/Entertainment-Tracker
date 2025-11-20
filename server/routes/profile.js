@@ -87,15 +87,26 @@ router.post("/:userId/username", requireAuth, ensureSelf, async (req, res) => {
 router.post("/:userId/friends/request", requireAuth, ensureSelf, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { friendUsername } = req.body || {};
+    let { friendUsername } = req.body || {};
+    if (!friendUsername || typeof friendUsername !== 'string') {
+      return res.status(400).json({ msg: "friendUsername required" });
+    }
+    friendUsername = friendUsername.trim().toLowerCase();
     if (!friendUsername) return res.status(400).json({ msg: "friendUsername required" });
-    const friend = await User.findOne({ username: friendUsername.toLowerCase() });
-    if (!friend) return res.status(404).json({ msg: "Friend not found" });
+
+    const friend = await User.findOne({ username: friendUsername });
+    if (!friend) return res.status(404).json({ msg: "Friend user not found" });
     if (friend._id.toString() === userId) return res.status(400).json({ msg: "Cannot add yourself" });
 
-    const myProfile = await Profile.findOne({ userId });
-    const theirProfile = await Profile.findOne({ userId: friend._id });
-    if (!myProfile || !theirProfile) return res.status(404).json({ msg: "Profile not found" });
+    // Ensure both profiles exist (auto-create if missing)
+    let myProfile = await Profile.findOne({ userId });
+    if (!myProfile) {
+      myProfile = await Profile.create({ userId, friends: [], incomingRequests: [], outgoingRequests: [], lists: [] });
+    }
+    let theirProfile = await Profile.findOne({ userId: friend._id });
+    if (!theirProfile) {
+      theirProfile = await Profile.create({ userId: friend._id, friends: [], incomingRequests: [], outgoingRequests: [], lists: [] });
+    }
 
     const alreadyFriends = (myProfile.friends || []).some(fid => fid.toString() === friend._id.toString());
     if (alreadyFriends) return res.status(200).json({ msg: "Already friends", already: true });
@@ -628,6 +639,22 @@ router.get("/:userId/stats", requireAuth, ensureSelf, async (req, res) => {
     return res.status(200).json(response);
   } catch (err) {
     console.error("Error getting stats:", err);
+    return res.status(500).json({ msg: "Server error" });
+  }
+});
+
+// Delete entire account (User + Profile, requires auth & self)
+router.delete("/:userId/deleteAccount", requireAuth, ensureSelf, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    // Remove profile first (if exists)
+    await Profile.deleteOne({ userId });
+    // Remove user
+    await User.deleteOne({ _id: userId });
+    // (Optional) TODO: remove related data like TempRegistration, etc.
+    return res.status(200).json({ msg: "Account deleted" });
+  } catch (err) {
+    console.error("Delete account error:", err);
     return res.status(500).json({ msg: "Server error" });
   }
 });

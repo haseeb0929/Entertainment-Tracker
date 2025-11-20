@@ -157,8 +157,9 @@ const ProfilePage = ({ navigateToPage }) => {
   const [outgoing, setOutgoing] = useState([]);
 
   // New: single fetch for all profile data
-  const { auth } = useAuth();
-  const userId = auth.user?.id; // or auth.user?._id depending on your backend
+  const { auth, setAuth } = useAuth();
+  // Prefer _id if present (Mongo default), fallback to id
+  const userId = auth?.user?._id || auth?.user?.id; // ensures correct userId for API paths
   console.log("now idf is: ", userId);
   useEffect(() => {
     console.log("Fetching profile for userId:", userId);
@@ -565,7 +566,7 @@ const ProfilePage = ({ navigateToPage }) => {
                   </div>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                   {isEditing ? (
                     <>
                       <Button
@@ -591,6 +592,36 @@ const ProfilePage = ({ navigateToPage }) => {
                     >
                       <Edit3 className="w-4 h-4 mr-2" />
                       Edit Profile
+                    </Button>
+                  )}
+                  {/* Delete Account Button */}
+                  {profileData && (
+                    <Button
+                      variant="outline"
+                      className="border-red-400/40 text-red-300 hover:bg-red-500/10"
+                      onClick={async () => {
+                        if (!auth?.user?.id) return;
+                        const sure = window.confirm("Delete your account permanently? This cannot be undone.");
+                        if (!sure) return;
+                        try {
+                          const res = await fetch(`http://localhost:5000/api/profile/${auth.user.id}/deleteAccount`, {
+                            method: 'DELETE',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              ...(auth?.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}),
+                            },
+                          });
+                          const data = await res.json();
+                          if (!res.ok) throw new Error(data.msg || 'Failed to delete');
+                          // Clear auth & navigate to login/auth page
+                          setAuth(null);
+                          navigateToPage && navigateToPage('auth');
+                        } catch (e) {
+                          alert(e.message);
+                        }
+                      }}
+                    >
+                      Delete Account
                     </Button>
                   )}
                 </div>
