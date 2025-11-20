@@ -398,6 +398,18 @@ const HomePage = ({ navigateToPage = () => { } }) => {
 
         {/* Entertainment Type Tabs */}
         <div className="mb-12">
+          {selectedMood !== 'none' && (
+            <div className="max-w-4xl mx-auto mb-4">
+              <Card className="bg-gradient-to-r from-purple-600/30 to-pink-600/30 border border-purple-500/40 backdrop-blur-sm">
+                <CardContent className="py-3 px-4 flex items-center justify-between">
+                  <span className="text-sm text-white/90">
+                    AI Recommendations for mood: <span className="font-semibold capitalize">{selectedMood}</span>
+                  </span>
+                  <Badge className="bg-purple-600 text-white shadow-md shadow-purple-800/30">AI</Badge>
+                </CardContent>
+              </Card>
+            </div>
+          )}
           <div className="grid grid-cols-6 bg-white/10 backdrop-blur-lg border border-white/20 rounded-lg p-1">
             <button
               onClick={() => setSelectedType("all")}

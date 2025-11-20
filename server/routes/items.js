@@ -921,19 +921,141 @@ router.get("/recommendations", async (req, res) => {
             } catch (_) {}
         }
 
-        const tasks = [];
-        const addTask = (fn) => tasks.push(fn);
+        // ---------- AI-assisted recommendations (Gemini) ----------
+        const GENAI_KEY = process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY || '';
 
-        const seed = (fallback) => (q && String(q).trim().length >= 3) ? String(q) : fallback;
+        async function callGeminiForTitles(moodStr, mediaType, querySeed) {
+            if (!GENAI_KEY) return [];
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(GENAI_KEY)}`;
+            const typeLabel = ({
+                movies: 'movies',
+                series: 'tv series',
+                anime: 'anime series',
+                books: 'books',
+                music: 'songs'
+            })[mediaType] || mediaType;
+            const prompt = [
+                `You are a recommender. Given a mood and media type, return only a compact JSON with a top list of widely-known, trending, high-quality ${typeLabel}.`,
+                `Mood: ${moodStr}`,
+                `Type: ${typeLabel}`,
+                querySeed && querySeed.trim().length ? `User hint: ${querySeed}` : null,
+                `Rules:`,
+                `- Output strictly as JSON: {"titles":["Title 1","Title 2", ...]}`,
+                `- Do not include commentary or markdown.`,
+                `- 10-15 items maximum.`
+            ].filter(Boolean).join('\n');
+            const body = {
+                contents: [{ parts: [{ text: prompt }] }]
+            };
+            try {
+                const resp = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const json = await resp.json();
+                const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                if (!text) return [];
+                let titles = [];
+                try {
+                    const parsed = JSON.parse(text);
+                    if (parsed && Array.isArray(parsed.titles)) titles = parsed.titles;
+                } catch (_) {
+                    // Fallback: parse lines
+                    titles = String(text)
+                        .split('\n')
+                        .map(s => s.replace(/^[-*\d.\s]+/, '').replace(/^\"|\"$/g, '').trim())
+                        .filter(Boolean)
+                        .slice(0, 12);
+                }
+                return titles.slice(0, 12);
+            } catch (e) {
+                return [];
+            }
+        }
 
-        if (typeList.includes('movies')) addTask(async () => _moviesFromTMDB('', profile.movies?.genre || 'all', 'all'));
-        if (typeList.includes('series')) addTask(async () => _seriesFromTMDB('', profile.series?.genre || 'all', 'all'));
-        if (typeList.includes('books')) addTask(async () => _booksFromGoogle(seed(profile.books?.search || mood), 'all', 'all'));
-        if (typeList.includes('anime')) addTask(async () => _animeFromTMDB('', profile.anime?.genre || 'all', 'all'));
-        if (typeList.includes('music')) addTask(async () => _musicFromSpotify(seed(profile.music?.search || mood)));
+        async function searchByType(mediaType, title) {
+            try {
+                switch (mediaType) {
+                    case 'movies': {
+                        const r = await _moviesFromTMDB(title, 'all', 'all');
+                        return r.slice(0, 2);
+                    }
+                    case 'series': {
+                        const r = await _seriesFromTMDB(title, 'all', 'all');
+                        return r.slice(0, 2);
+                    }
+                    case 'anime': {
+                        const r = await _animeFromTMDB(title, 'all', 'all');
+                        return r.slice(0, 2);
+                    }
+                    case 'books': {
+                        const r = await _booksFromGoogle(title, 'all', 'all');
+                        return r.slice(0, 2);
+                    }
+                    case 'music': {
+                        const r = await _musicFromSpotify(title);
+                        return r.slice(0, 3);
+                    }
+                    default:
+                        return [];
+                }
+            } catch (_) {
+                return [];
+            }
+        }
 
-        const results = await Promise.all(tasks.map(t => t().catch(() => [])));
-        let combined = results.flat();
+        async function aiRecommendations() {
+            const seed = (fallback) => (q && String(q).trim().length >= 3) ? String(q) : fallback;
+            const out = [];
+            const seen = new Set();
+            for (const t of typeList) {
+                const seedHint = (
+                    t === 'books' ? (profile.books?.search || mood) :
+                    t === 'music' ? (profile.music?.search || mood) : ''
+                );
+                const titles = await callGeminiForTitles(mood, t, seed(seedHint));
+                for (const title of titles) {
+                    const matches = await searchByType(t, title);
+                    for (const it of matches) {
+                        const key = `${(it.title||'').toLowerCase()}|${(it.type||'')}`;
+                        if (seen.has(key)) continue;
+                        seen.add(key);
+                        out.push(it);
+                        if (out.length >= limit) return out;
+                    }
+                }
+                if (out.length >= limit) break;
+            }
+            return out;
+        }
+
+        let combined = [];
+        if (GENAI_KEY && mood && mood !== 'none') {
+            // Cache AI recs to reduce calls
+            const cacheKey = `ai:rec:${mood}:${typeList.sort().join(',')}:${(q||'').trim().toLowerCase()}:lim${limit}`;
+            const cachedAi = getCache(cacheKey);
+            if (cachedAi) {
+                combined = cachedAi;
+            } else {
+                combined = await aiRecommendations().catch(() => []);
+                if (combined.length > 0) setCache(cacheKey, combined, 5 * 60 * 1000);
+            }
+        }
+
+        // Fallback to heuristic profile if AI off or returned nothing
+        if (combined.length === 0) {
+            const tasks = [];
+            const addTask = (fn) => tasks.push(fn);
+            const seed = (fallback) => (q && String(q).trim().length >= 3) ? String(q) : fallback;
+            if (typeList.includes('movies')) addTask(async () => _moviesFromTMDB('', profile.movies?.genre || 'all', 'all'));
+            if (typeList.includes('series')) addTask(async () => _seriesFromTMDB('', profile.series?.genre || 'all', 'all'));
+            if (typeList.includes('books')) addTask(async () => _booksFromGoogle(seed(profile.books?.search || mood), 'all', 'all'));
+            if (typeList.includes('anime')) addTask(async () => _animeFromTMDB('', profile.anime?.genre || 'all', 'all'));
+            if (typeList.includes('music')) addTask(async () => _musicFromSpotify(seed(profile.music?.search || mood)));
+            const results = await Promise.all(tasks.map(t => t().catch(() => [])));
+            combined = results.flat();
+        }
 
         // Filter out owned
         combined = combined.filter(it => {
